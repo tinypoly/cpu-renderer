@@ -1,6 +1,6 @@
 {
   "name": "@tinypoly/cpu-renderer",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Software renderer for Three.js scenes: a multi-worker CPU rasterizer with a GLSL interpreter, BVH shadows, diffuse global illumination and denoising.",
   "keywords": [
     "three",
