@@ -1,5 +1,11 @@
 # @tinypoly/cpu-renderer
 
+[![npm version](https://img.shields.io/npm/v/@tinypoly/cpu-renderer)](https://www.npmjs.com/package/@tinypoly/cpu-renderer)
+[![npm downloads](https://img.shields.io/npm/dm/@tinypoly/cpu-renderer)](https://www.npmjs.com/package/@tinypoly/cpu-renderer)
+[![CI](https://github.com/tinypoly/cpu-renderer/actions/workflows/ci.yml/badge.svg)](https://github.com/tinypoly/cpu-renderer/actions/workflows/ci.yml)
+[![types](https://img.shields.io/npm/types/@tinypoly/cpu-renderer)](https://www.npmjs.com/package/@tinypoly/cpu-renderer)
+[![license](https://img.shields.io/npm/l/@tinypoly/cpu-renderer)](LICENSE)
+
 A software renderer for [Three.js](https://threejs.org) scenes. It takes an ordinary `THREE.Scene` and renders it on the CPU across a pool of Web Workers, bucket by bucket, into a 2D canvas. It never creates a WebGL context.
 
 It powers the render mode of the [Tinypoly](https://tinypoly.com) editor.
