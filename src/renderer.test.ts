@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { serializeCamera } from "./camera.js";
-import { CpuRenderer, defaultWorkerCount, effectiveWorkerCount, isAbortError, MAX_RENDER_WORKERS } from "./renderer.js";
+import { shareable } from "./sharedBuffers.js";
+import {
+  CpuRenderer,
+  defaultWorkerCount,
+  effectiveWorkerCount,
+  isAbortError,
+  MAX_RENDER_WORKERS,
+  type CpuRendererOptions,
+  type RenderPixels,
+  type RenderWorker,
+} from "./renderer.js";
 import type { WorkerRequest, WorkerResponse } from "./protocol.js";
 import type { SerializedSceneResult } from "./sceneSerialization.js";
 
@@ -28,14 +38,11 @@ class FakeWorker {
 }
 
 const emptyScene = (): SerializedSceneResult => ({ scene: { meshes: [], lights: [], textures: [] }, transfer: [] });
-const createWorker = () => new FakeWorker() as unknown as Worker;
+const createWorker = () => new FakeWorker() as unknown as RenderWorker;
 
-function fakeCanvas(size: Partial<Record<"clientWidth" | "clientHeight" | "width" | "height", number>> = {}) {
-  const context = { clearRect: vi.fn(), putImageData: vi.fn() };
-
-  return { getContext: () => context, clientWidth: 32, clientHeight: 32, width: 32, height: 32, ...size, context } as
-    unknown as HTMLCanvasElement & { context: typeof context };
-}
+/** A renderer on fake workers, 32 × 32 unless the options say otherwise. */
+const create = (options: Partial<CpuRendererOptions> = {}) =>
+  new CpuRenderer({ width: 32, height: 32, createWorker, ...options });
 
 /** Plays the owner worker through a frame of two buckets, without denoiser or cache. */
 function completeFrame(worker: FakeWorker, revision: number) {
@@ -50,9 +57,6 @@ const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 beforeEach(() => {
   FakeWorker.instances = [];
-  vi.stubGlobal("ImageData", class {
-    constructor(public data: Uint8ClampedArray, public width: number, public height: number) {}
-  });
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -60,6 +64,16 @@ describe("worker pool size", () => {
   it("keeps one core free and caps the pool", () => {
     expect(defaultWorkerCount()).toBeGreaterThanOrEqual(1);
     expect(defaultWorkerCount()).toBeLessThanOrEqual(MAX_RENDER_WORKERS);
+    vi.stubGlobal("crossOriginIsolated", true);
+    expect(defaultWorkerCount(16)).toBe(8);
+    expect(defaultWorkerCount(4)).toBe(3);
+    expect(defaultWorkerCount(1)).toBe(1);
+  });
+  it("shares memory in Node without cross-origin isolation, unless the page says otherwise", () => {
+    vi.unstubAllGlobals();
+    expect(shareable()).toBe(true);
+    vi.stubGlobal("crossOriginIsolated", false);
+    expect(shareable()).toBe(false);
   });
   it("bounds automatic concurrency and avoids scene copies without shared memory", () => {
     vi.stubGlobal("navigator", { hardwareConcurrency: 32 });
@@ -75,7 +89,7 @@ describe("worker pool size", () => {
 describe("CpuRenderer", () => {
   it.each([false, true])("requests a published frame only when readers exist (shared=%s)", async shared => {
     vi.stubGlobal("crossOriginIsolated", shared);
-    const renderer = new CpuRenderer(fakeCanvas(), { workers: 4, createWorker });
+    const renderer = create({ workers: 4 });
     expect(renderer.workerCount).toBe(shared ? 4 : 1);
     void renderer.render().catch(() => {});
     await settle();
@@ -94,11 +108,10 @@ describe("CpuRenderer", () => {
   it("sends every input on the first frame and only the changed ones afterwards", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
 
-    const renderer = new CpuRenderer(fakeCanvas(), {
+    const renderer = create({
       settings: { samples: 1 },
       environment: { kind: "gradient", topColor: "#fff", bottomColor: "#000" },
       width: 64, height: 48, pixelRatio: 2,
-      createWorker,
     });
 
     const [worker] = FakeWorker.instances;
@@ -110,7 +123,10 @@ describe("CpuRenderer", () => {
     expect(frame.environment).toEqual({ kind: "gradient", topColor: "#fff", bottomColor: "#000" });
     expect(frame.camera.matrixWorld).toHaveLength(16);
     completeFrame(worker, frame.revision);
-    await expect(first).resolves.toBeUndefined();
+    // The promise carries the finished image, the same buffer `image` holds.
+    const image = await first;
+    expect([image.width, image.height, image.data.length]).toEqual([32, 32, 32 * 32 * 4]);
+    expect(image).toBe(renderer.image);
 
     // Nothing changed: the frame restarts with the same inputs, without resending the scene or the environment.
     renderer.setSettings({ samples: 8 });
@@ -123,7 +139,7 @@ describe("CpuRenderer", () => {
     expect(again.settings.maxSamples).toBe(8);
     expect(renderer.settings.samples).toBe(8);
     completeFrame(worker, again.revision);
-    await expect(second).resolves.toBeUndefined();
+    await expect(second).resolves.toMatchObject({ width: 32, height: 32 });
 
     renderer.setScene(emptyScene());
     renderer.setEnvironment({ kind: "hdri", url: "studio.hdr" });
@@ -138,7 +154,7 @@ describe("CpuRenderer", () => {
 
   it("resolves render() when the last bucket is painted and reports progress through events", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
-    const renderer = new CpuRenderer(fakeCanvas(), { createWorker });
+    const renderer = create();
     const [worker] = FakeWorker.instances;
     const progress: unknown[] = [], events: string[] = [];
     renderer.on("progress", next => progress.push(next));
@@ -158,7 +174,7 @@ describe("CpuRenderer", () => {
     expect(progress.at(-1)).toMatchObject({ completed: 1, total: 2, phase: "shade" });
     expect(events).toEqual(["start"]);
     worker.reply({ type: "bucket", revision, bucket: { x: 0, y: 0, width: 32, height: 16, index: 0 }, pixels });
-    await expect(done).resolves.toBeUndefined();
+    await expect(done).resolves.toBe(renderer.image);
     expect(events).toEqual(["start", "complete"]);
     expect(renderer.rendering).toBe(false);
     // Output of a finished revision is ignored.
@@ -168,7 +184,7 @@ describe("CpuRenderer", () => {
 
   it("aborts the frame in flight when render() is called again, and fails it on a worker error", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
-    const renderer = new CpuRenderer(fakeCanvas(), { createWorker });
+    const renderer = create();
     const [worker] = FakeWorker.instances;
     const errors: Error[] = [];
     renderer.on("error", error => errors.push(error));
@@ -194,7 +210,7 @@ describe("CpuRenderer", () => {
 
   it("pauses and resumes every worker without opening a revision", async() => {
     vi.stubGlobal("crossOriginIsolated", true);
-    const renderer = new CpuRenderer(fakeCanvas(), { workers: 2, createWorker });
+    const renderer = create({ workers: 2 });
     void renderer.render().catch(() => {});
     await settle();
     const revision = FakeWorker.instances[0].last("frame")!.revision;
@@ -215,7 +231,7 @@ describe("CpuRenderer", () => {
 describe("CpuRenderer frame phases", () => {
   it("fills the cache grid level by level, shares its records with every worker, then shades", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
-    const renderer = new CpuRenderer(fakeCanvas(), { createWorker });
+    const renderer = create();
     const [worker] = FakeWorker.instances;
     const phases: string[] = [];
     renderer.on("progress", ({ phase, completed, total }) => phases.push(`${phase} ${completed}/${total}`));
@@ -235,18 +251,18 @@ describe("CpuRenderer frame phases", () => {
     expect(worker.last("render")).toMatchObject({ bucket: 0, phase: "shade" });
     worker.reply({ type: "bucket", revision, bucket: { x: 0, y: 0, width: 32, height: 32, index: 0 },
       pixels: new Uint8ClampedArray(32 * 32 * 4) });
-    await expect(done).resolves.toBeUndefined();
+    await expect(done).resolves.toBe(renderer.image);
     // The last band hands over to shading directly, and the frame reports its end once.
     expect(phases).toEqual(["prepare 0/0", "cache 0/3", "cache 1/3", "cache 2/3", "shade 0/1", "shade 1/1"]);
   });
 
   it("hands the bucket accumulations to the denoiser and completes only when it answers", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
-    const canvas = fakeCanvas();
-    const renderer = new CpuRenderer(canvas, { createWorker });
+    const renderer = create();
     const [worker] = FakeWorker.instances;
-    const complete = vi.fn(), phases: string[] = [];
+    const complete = vi.fn(), phases: string[] = [], painted: RenderPixels[] = [];
     renderer.on("complete", complete);
+    renderer.on("pixels", pixels => painted.push(pixels));
     renderer.on("progress", ({ phase }) => phases.push(phase));
     const done = renderer.render();
     await settle();
@@ -264,44 +280,61 @@ describe("CpuRenderer frame phases", () => {
     expect(complete).not.toHaveBeenCalled();
     expect(renderer.rendering).toBe(true);
 
-    // The denoised image comes back in row bands painted at their offset.
+    // The denoised image comes back in row bands, handed out at their offset.
+    const rows = new Uint8ClampedArray(32 * 4 * 4).fill(7);
     worker.reply({ type: "pixels", revision, bucket: { x: 0, y: 0, width: 32, height: 32, index: -1 }, row: 8,
-      pixels: new Uint8ClampedArray(32 * 4 * 4) });
-    const [image, x, y] = canvas.context.putImageData.mock.calls.at(-1)!;
-    expect([image.width, image.height, x, y]).toEqual([32, 4, 0, 8]);
+      pixels: rows });
+    expect(painted.at(-1)).toEqual({ x: 0, y: 8, width: 32, height: 4, data: rows });
+    expect(renderer.image!.data[8 * 32 * 4]).toBe(7);
+    expect(renderer.image!.data[12 * 32 * 4]).toBe(0);
     worker.reply({ type: "denoised", revision });
-    await expect(done).resolves.toBeUndefined();
+    await expect(done).resolves.toBe(renderer.image);
     expect(complete).toHaveBeenCalledOnce();
   });
 
-  it("sizes the canvas on start, paints live rows of a bucket and reports which worker is on it", async() => {
+  it("allocates the image on start, hands out live rows of a bucket and reports which worker is on it", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
-    const canvas = fakeCanvas();
-    const renderer = new CpuRenderer(canvas, { createWorker });
+    const renderer = create();
     const [worker] = FakeWorker.instances;
-    const buckets: unknown[] = [], starts: unknown[] = [];
+    const buckets: unknown[] = [], starts: unknown[] = [], painted: RenderPixels[] = [];
     renderer.on("bucket", event => buckets.push(event));
     renderer.on("start", event => starts.push(event));
+    renderer.on("pixels", event => painted.push(event));
+    expect(renderer.image).toBeNull();
     void renderer.render().catch(() => {});
     await settle();
     const { revision } = worker.last("frame")!;
     worker.reply({ type: "start", revision, width: 40, height: 20, order: [0], denoise: false, prepass: [] });
-    expect([canvas.width, canvas.height]).toEqual([40, 20]);
     expect(starts).toEqual([{ width: 40, height: 20 }]);
+    const image = renderer.image!;
+    expect([image.width, image.height, image.data.length]).toEqual([40, 20, 40 * 20 * 4]);
     const bucket = { x: 8, y: 4, width: 4, height: 4, index: 0 };
     worker.reply({ type: "active", revision, bucket });
     expect(buckets.at(-1)).toEqual({ worker: 0, bucket, width: 40, height: 20 });
-    worker.reply({ type: "pixels", revision, bucket, row: 2, pixels: new Uint8ClampedArray(4 * 4) });
-    const [image, x, y] = canvas.context.putImageData.mock.calls.at(-1)!;
-    expect([image.width, image.height, x, y]).toEqual([4, 1, 8, 6]);
-    worker.reply({ type: "bucket", revision, bucket, pixels: new Uint8ClampedArray(4 * 4 * 4) });
+    // One row of the bucket, resolved so far: it lands at the bucket's x and at the row's y.
+    const row = new Uint8ClampedArray(4 * 4).fill(9);
+    worker.reply({ type: "pixels", revision, bucket, row: 2, pixels: row });
+    expect(painted.at(-1)).toEqual({ x: 8, y: 6, width: 4, height: 1, data: row });
+    expect(Array.from(image.data.subarray((6 * 40 + 8) * 4, (6 * 40 + 12) * 4))).toEqual(Array(16).fill(9));
+    expect(image.data[(6 * 40 + 12) * 4]).toBe(0);
+    expect(image.data[(7 * 40 + 8) * 4]).toBe(0);
+    const whole = new Uint8ClampedArray(4 * 4 * 4).fill(3);
+    worker.reply({ type: "bucket", revision, bucket, pixels: whole });
+    expect(painted.at(-1)).toEqual({ x: 8, y: 4, width: 4, height: 4, data: whole });
+    expect(image.data[(6 * 40 + 8) * 4]).toBe(3);
     expect(buckets.at(-1)).toEqual({ worker: 0, bucket: null, width: 40, height: 20 });
+    // The next frame gets its own buffer: the finished image stays intact for whoever kept it.
+    void renderer.render().catch(() => {});
+    await settle();
+    worker.reply({ type: "start", revision: revision + 1, width: 40, height: 20, order: [0], denoise: false, prepass: [] });
+    expect(renderer.image).not.toBe(image);
+    expect(image.data[(6 * 40 + 8) * 4]).toBe(3);
     renderer.dispose();
   });
 
   it("forwards the owner's preparation to the other workers, which then take buckets too", async() => {
     vi.stubGlobal("crossOriginIsolated", true);
-    const renderer = new CpuRenderer(fakeCanvas(), { workers: 3, createWorker });
+    const renderer = create({ workers: 3 });
     const [owner, ...readers] = FakeWorker.instances;
     void renderer.render().catch(() => {});
     await settle();
@@ -325,10 +358,7 @@ describe("CpuRenderer inputs", () => {
   it("merges settings group by group and sends them to the workers in the engine's flat form", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
 
-    const renderer = new CpuRenderer(fakeCanvas(), {
-      settings: { depthOfField: { enabled: true }, background: { mode: "color" } },
-      createWorker,
-    });
+    const renderer = create({ settings: { depthOfField: { enabled: true }, background: { mode: "color" } } });
 
     const [worker] = FakeWorker.instances;
     renderer.setSettings({ depthOfField: { aperture: 1.4 }, toneMapping: "agx" });
@@ -345,7 +375,7 @@ describe("CpuRenderer inputs", () => {
 
   it("reloads the environment only when its image changes, not its intensity or rotation", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
-    const renderer = new CpuRenderer(fakeCanvas(), { environment: { kind: "hdri", url: "a.hdr" }, createWorker });
+    const renderer = create({ environment: { kind: "hdri", url: "a.hdr" } });
     const [worker] = FakeWorker.instances;
 
     const frame = async() => {
@@ -371,7 +401,7 @@ describe("CpuRenderer inputs", () => {
     scene.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial()));
     const camera = new THREE.PerspectiveCamera(35, 1, 0.5, 20);
     camera.position.set(1, 2, 3);
-    const renderer = new CpuRenderer(fakeCanvas(), { scene, camera, createWorker });
+    const renderer = create({ scene, camera });
     const [worker] = FakeWorker.instances;
     void renderer.render().catch(() => {});
     await settle();
@@ -398,7 +428,7 @@ describe("CpuRenderer inputs", () => {
     vi.stubGlobal("crossOriginIsolated", false);
     const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
     const snapshot = serializeCamera(camera);
-    const renderer = new CpuRenderer(fakeCanvas(), { camera: snapshot, createWorker });
+    const renderer = create({ camera: snapshot });
     const [worker] = FakeWorker.instances;
     camera.position.set(9, 9, 9);
     void renderer.render().catch(() => {});
@@ -418,7 +448,7 @@ describe("CpuRenderer inputs", () => {
     vi.stubGlobal("crossOriginIsolated", false);
     const first = new THREE.Scene();
     first.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()));
-    const renderer = new CpuRenderer(fakeCanvas(), { scene: first, createWorker });
+    const renderer = create({ scene: first });
     const [worker] = FakeWorker.instances;
     const done = renderer.render();
     renderer.setScene(emptyScene());
@@ -435,7 +465,7 @@ describe("CpuRenderer inputs", () => {
     // Stencil operations have no CPU equivalent: serialization refuses them.
     material.stencilWrite = true;
     scene.add(new THREE.Mesh(new THREE.PlaneGeometry(), material));
-    const renderer = new CpuRenderer(fakeCanvas(), { scene, createWorker });
+    const renderer = create({ scene });
     const [worker] = FakeWorker.instances;
     const errors: string[] = [];
     renderer.on("error", error => errors.push(error.message));
@@ -450,29 +480,34 @@ describe("CpuRenderer inputs", () => {
     renderer.dispose();
   });
 
-  it("measures the canvas at each frame unless a size is set", async() => {
+  it("sends the size and pixel ratio it was given and the ones set afterwards", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
-    const canvas = fakeCanvas({ clientWidth: 0, clientHeight: 0, width: 300, height: 150 });
-    const renderer = new CpuRenderer(canvas, { pixelRatio: 1.5, createWorker });
+    const renderer = create({ width: 300, height: 150, pixelRatio: 1.5 });
     const [worker] = FakeWorker.instances;
     void renderer.render().catch(() => {});
     await settle();
-    // A canvas outside the layout has no CSS size: its attribute size stands in.
     expect(worker.last("frame")).toMatchObject({ width: 300, height: 150, pixelRatio: 1.5 });
-    Object.assign(canvas, { clientWidth: 64, clientHeight: 48 });
+    // The size is whole CSS pixels; the pixel ratio stays unless given.
+    renderer.setSize(10.7, 5.2);
     void renderer.render().catch(() => {});
     await settle();
-    expect(worker.last("frame")).toMatchObject({ width: 64, height: 48 });
-    renderer.setSize(10.7, 5.2, 3);
+    expect(worker.last("frame")).toMatchObject({ width: 10, height: 5, pixelRatio: 1.5 });
+    renderer.setSize(0, -4, 3);
     void renderer.render().catch(() => {});
     await settle();
-    expect(worker.last("frame")).toMatchObject({ width: 10, height: 5, pixelRatio: 3 });
+    expect(worker.last("frame")).toMatchObject({ width: 1, height: 1, pixelRatio: 3 });
+    renderer.setPixelRatio(2);
+    void renderer.render().catch(() => {});
+    await settle();
+    expect(worker.last("frame")).toMatchObject({ width: 1, height: 1, pixelRatio: 2 });
+    expect(() => renderer.setPixelRatio(0)).toThrow("pixelRatio");
+    expect(() => create({ pixelRatio: Number.NaN })).toThrow("pixelRatio");
     renderer.dispose();
   });
 
   it("fails the frame when a worker cannot load or a message cannot be decoded", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
-    const renderer = new CpuRenderer(fakeCanvas(), { createWorker });
+    const renderer = create();
 
     const [worker] = FakeWorker.instances as (FakeWorker & { onerror: (event: { message: string }) => void;
       onmessageerror: () => void })[];
@@ -489,7 +524,7 @@ describe("CpuRenderer inputs", () => {
 
   it("ignores worker output after dispose", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
-    const renderer = new CpuRenderer(fakeCanvas(), { createWorker });
+    const renderer = create();
     const [worker] = FakeWorker.instances;
     const listener = vi.fn();
     renderer.on("start", listener);

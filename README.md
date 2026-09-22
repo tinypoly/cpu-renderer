@@ -6,7 +6,7 @@
 [![types](https://img.shields.io/npm/types/@tinypoly/cpu-renderer)](https://www.npmjs.com/package/@tinypoly/cpu-renderer)
 [![license](https://img.shields.io/npm/l/@tinypoly/cpu-renderer)](LICENSE)
 
-A software renderer for [Three.js](https://threejs.org) scenes. It takes an ordinary `THREE.Scene` and renders it on the CPU across a pool of Web Workers, bucket by bucket, into a 2D canvas. It never creates a WebGL context.
+A software renderer for [Three.js](https://threejs.org) scenes. It takes an ordinary `THREE.Scene` and renders it on the CPU across a pool of workers, bucket by bucket. It runs in the browser and in Node, and never creates a WebGL context.
 
 It powers the render mode of the [Tinypoly](https://tinypoly.com) editor.
 
@@ -18,8 +18,9 @@ It powers the render mode of the [Tinypoly](https://tinypoly.com) editor.
 - BVH ray-traced shadows with soft penumbrae, and ambient occlusion.
 - Diffuse global illumination with an irradiance cache, an SVGF-style denoiser and environment importance sampling.
 - HDR or gradient environments, depth of field with polygonal bokeh, fog, vignette and grain, and ACES, AgX or Neutral tone mapping.
-- Progressive output: pixels appear as they finish on your canvas, and the render can be paused and resumed.
-- With cross-origin isolation, the workers share the prepared scene through `SharedArrayBuffer`, so adding a worker costs almost no memory.
+- Progressive output: pixels arrive as they finish, and the render can be paused and resumed.
+- With cross-origin isolation, or in Node, the workers share the prepared scene through `SharedArrayBuffer`, so adding a worker costs almost no memory.
+- No DOM dependency: the renderer takes a size and hands back pixels. The browser canvas and the Node worker threads are adapters around it.
 
 ## Install
 
@@ -33,7 +34,7 @@ npm install @tinypoly/cpu-renderer three
 
 ```ts
 import * as THREE from "three";
-import { CpuRenderer } from "@tinypoly/cpu-renderer";
+import { CpuRenderer, attachCanvas } from "@tinypoly/cpu-renderer";
 
 const scene = new THREE.Scene();
 const sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), new THREE.MeshPhysicalMaterial({ color: "tomato" }));
@@ -44,32 +45,45 @@ const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
 camera.position.set(0, 1, 5);
 camera.lookAt(0, 0, 0);
 
-const renderer = new CpuRenderer(document.querySelector("canvas")!, {
+const canvas = document.querySelector("canvas")!;
+
+const renderer = new CpuRenderer({
+  width: canvas.clientWidth,
+  height: canvas.clientHeight,
+  pixelRatio: window.devicePixelRatio,
   scene,
   camera,
   environment: { kind: "gradient", topColor: "#9cb8d8", bottomColor: "#2b2a28" },
 });
 
+attachCanvas(renderer, canvas); // sizes the canvas and paints each bucket as it finishes
 renderer.on("progress", ({ completed, total }) => console.log(`${completed} / ${total}`));
-await renderer.render();
-// The canvas holds the image: renderer.canvas.toBlob(...) saves it as a PNG.
+const { width, height, data } = await renderer.render(); // RGBA bytes of the finished image
+// The canvas holds the same picture: canvas.toBlob(...) saves it as a PNG.
 ```
 
-The image size is the canvas' CSS size. Only meshes with `castShadow` / `receiveShadow` take part in shadows.
+`width` and `height` are pixels; the render size multiplies them by `pixelRatio` and `settings.renderScale`. Only meshes with `castShadow` / `receiveShadow` take part in shadows.
+
+Without a canvas, listen to the pixels yourself:
+
+```ts
+renderer.on("start", ({ width, height }) => { /* the render size */ });
+renderer.on("pixels", ({ x, y, width, height, data }) => { /* RGBA rows of a finished region */ });
+```
 
 Setters record the inputs; `render()` starts a frame with the current ones:
 
 ```ts
 camera.position.x += 1;                  // the camera is read at every render()
 renderer.setSettings({ globalIllumination: { enabled: true, samples: 128 } });
-await renderer.render();
+const image = await renderer.render();
 ```
 
 ## API
 
-### `new CpuRenderer(canvas, options?)`
+### `new CpuRenderer(options)`
 
-`canvas` is an `HTMLCanvasElement`; its 2D context receives the buckets. Every option has a setter of the same name.
+Every option has a setter of the same name.
 
 | Option | Type | |
 | --- | --- | --- |
@@ -77,26 +91,27 @@ await renderer.render();
 | `camera` | `THREE.PerspectiveCamera`, `THREE.OrthographicCamera` or `CameraState` | A Three camera is read at every `render()`. Defaults to a perspective camera at (5, 5, 5) looking at the origin. |
 | `settings` | `RenderSettingsInput` | Merged over `DEFAULT_RENDER_SETTINGS`, group by group. See [Settings](#settings). |
 | `environment` | `RenderEnvironment` | See [Environment](#environment). Defaults to `DEFAULT_RENDER_ENVIRONMENT`, a gradient. |
-| `width`, `height` | `number` | Image size in CSS pixels. Without them, each frame measures the canvas' CSS size. |
-| `pixelRatio` | `number` | Defaults to `window.devicePixelRatio`. |
-| `workers` | `number` | Pool size. Defaults to `defaultWorkerCount()`: cores minus one, at most 8. Capped at `MAX_RENDER_WORKERS` (32). |
-| `createWorker` | `() => Worker` | Worker factory. See [Bundlers and the worker](#bundlers-and-the-worker). |
+| `width`, `height` | `number` | Required. Image size in CSS pixels. |
+| `pixelRatio` | `number` | Defaults to 1. Pass `window.devicePixelRatio` for a sharp image on a high-density screen. |
+| `workers` | `number` | Pool size. Defaults to `defaultWorkerCount()`: cores minus one, at most 8. Capped at `MAX_RENDER_WORKERS` (32), and at one without shared memory. |
+| `createWorker` | `() => RenderWorker` | Worker factory: a Web Worker, or anything with its `postMessage` / `onmessage` shape. See [Bundlers and the worker](#bundlers-and-the-worker) and [Node](#node). |
 
 ### Methods
 
 | Method | |
 | --- | --- |
-| `render()` | Starts a frame with the current inputs and discards the one in progress. Resolves when the canvas holds the finished image. Rejects with an `AbortError` (see `isAbortError`) when a later `render()` or `dispose()` replaces the frame, and with the worker's error when the frame fails. |
+| `render()` | Starts a frame with the current inputs and discards the one in progress. Resolves with the finished image, `{ width, height, data }`: `data` is RGBA bytes, straight sRGB, `width * height * 4` long. Rejects with an `AbortError` (see `isAbortError`) when a later `render()` or `dispose()` replaces the frame, and with the worker's error when the frame fails. |
 | `setScene(scene)` | A Three scene is serialized in the background; `render()` waits for it. |
 | `setCamera(camera)` | A Three camera is read as it is at every `render()`, so moving it or changing its aspect only needs a new frame. A `CameraState` from `serializeCamera` stays fixed. |
 | `setSettings(settings)` | Merges the given fields into the current settings, group by group: `{ fog: { enabled: true } }` keeps the other fog fields. |
 | `setEnvironment(environment)` | Replaces the environment. A change of intensity or rotation alone does not load the image again. |
-| `setSize(width, height, pixelRatio?)` | Fixes the image size in CSS pixels. |
+| `setSize(width, height, pixelRatio?)` | Image size in CSS pixels for the next frame; the pixel ratio stays unless given. |
+| `setPixelRatio(pixelRatio)` | |
 | `pause()`, `resume()` | Stops or continues every worker on the same frame. |
 | `dispose()` | Terminates the workers. |
 | `settings` | The settings the next frame renders with. |
 | `rendering`, `paused` | Whether a frame is in flight and whether the workers are paused. |
-| `canvas` | The output canvas passed to the constructor. |
+| `image` | The frame in flight, filled as buckets finish, or the last one, in the shape `render()` resolves with. `null` before the first frame starts. Each frame allocates a new buffer, so the image one `render()` resolved with stays as it is. |
 | `workerCount` | Number of workers actually running. |
 
 ### Events
@@ -105,11 +120,16 @@ await renderer.render();
 
 | Event | Payload | |
 | --- | --- | --- |
-| `start` | `{ width, height }` | The workers prepared the frame and are shading. The canvas has the render size. |
+| `start` | `{ width, height }` | The workers prepared the frame and are shading. `image` has the render size and is empty. |
+| `pixels` | `{ x, y, width, height, data }` | Finished pixels of a region, as they arrive: rows of a bucket resolved so far, then the whole bucket. `image` already holds them. |
 | `progress` | `{ completed, total, phase }` | Work done out of `total`. `phase` is `"prepare"`, `"cache"` (irradiance cache), `"shade"` (buckets) or `"denoise"`. |
 | `bucket` | `{ worker, bucket, width, height }` | The bucket a worker is on, or `null` when it is idle. Useful to draw progress frames. |
-| `complete` | | The image on the canvas is finished. `render()` resolves right after. |
+| `complete` | | The image is finished. `render()` resolves with it right after. |
 | `error` | `Error` | The frame failed. Unsupported shader syntax is reported here. `render()` rejects with the same error. |
+
+### `attachCanvas(renderer, canvas)`
+
+Paints the output on an `HTMLCanvasElement`: the canvas takes the render size at `start` and every `pixels` event lands at its position through `putImageData`. Attached after a frame started, it first paints what `image` already holds. Returns the function that detaches it; the canvas keeps its last contents.
 
 ### Settings
 
@@ -184,8 +204,8 @@ light.userData.cpuRenderer = { volumetric: { density: 0.05 } } satisfies CpuRend
 | `serializeCamera(camera)` | A fixed `CameraState` snapshot of a Three camera, including zoom and view offsets. |
 | `sceneSignature(scene)` | A string that changes whenever something the renderer reads changes. Compare it before re-serializing an interactive scene. |
 | `isAbortError(error)` | Whether a `render()` rejection means the frame was replaced rather than failed. |
-| `shareable()` | Whether the page is cross-origin isolated, and so whether more than one worker can run. |
-| `defaultWorkerCount()` | The pool size used when `workers` is omitted. |
+| `shareable()` | Whether the workers can share memory: a cross-origin isolated page, or Node. Without it a single worker runs. |
+| `defaultWorkerCount(cores?)` | The pool size used when `workers` is omitted: `cores` (default `navigator.hardwareConcurrency`) minus one, at most 8, or 1 without shared memory. |
 
 ### Engine
 
@@ -210,12 +230,27 @@ If your setup cannot follow the pattern, pass your own factory. The worker entry
 ```ts
 import RenderWorker from "@tinypoly/cpu-renderer/worker?worker"; // Vite syntax
 
-new CpuRenderer(canvas, { createWorker: () => new RenderWorker() });
+new CpuRenderer({ width, height, createWorker: () => new RenderWorker() });
 ```
+
+## Node
+
+`@tinypoly/cpu-renderer/node` runs the same workers on `worker_threads`. Node 20 or newer; memory is shared without any header.
+
+```ts
+import { CpuRenderer } from "@tinypoly/cpu-renderer";
+import { createNodeWorker } from "@tinypoly/cpu-renderer/node";
+
+const renderer = new CpuRenderer({ width: 800, height: 600, scene, camera, createWorker: createNodeWorker });
+const { width, height, data } = await renderer.render(); // RGBA bytes: encode with pngjs, sharp or the like
+renderer.dispose();
+```
+
+`wrapNodeWorker(worker)` adapts a `worker_threads` thread you start yourself. Textures must carry their pixels (`DataTexture`, HDR, or a KTX2 transcoded to RGBA): images backed by an `<img>` or `ImageBitmap` are read through `OffscreenCanvas`, which Node does not have. An `hdri` environment loads through `fetch`, which in Node takes `http(s):` URLs only.
 
 ## Cross-origin isolation
 
-More than one worker needs `SharedArrayBuffer`, which browsers only allow on cross-origin isolated pages:
+In the browser, more than one worker needs `SharedArrayBuffer`, which browsers only allow on cross-origin isolated pages:
 
 ```
 Cross-Origin-Opener-Policy: same-origin

@@ -1,4 +1,5 @@
-// The public API: render a Three.js scene on the CPU into a canvas. The engine behind it is `@tinypoly/cpu-renderer/engine`.
+// The public API: render a Three.js scene on the CPU, into `image` and the `pixels` event. `attachCanvas` paints on
+// a canvas; `@tinypoly/cpu-renderer/node` runs the workers in Node. The engine behind it is `@tinypoly/cpu-renderer/engine`.
 
 export { CpuRenderer, MAX_RENDER_WORKERS, createDefaultWorker, defaultWorkerCount, isAbortError } from "./renderer.js";
 
@@ -6,10 +7,15 @@ export type {
   CpuRendererEvents,
   CpuRendererOptions,
   RenderCamera,
+  RenderImage,
   RenderPhase,
+  RenderPixels,
   RenderScene,
+  RenderWorker,
   WorkerFactory,
 } from "./renderer.js";
+
+export { attachCanvas } from "./canvas.js";
 
 export type { Listener } from "./events.js";
 export type { Bucket } from "./rasterizer.js";

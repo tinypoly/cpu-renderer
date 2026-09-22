@@ -212,6 +212,8 @@ describe("render worker", () => {
   });
 
   it("returns the denoiser accumulations with each bucket and denoises the whole image on request", async() => {
+    // Without shared memory: what the workers cannot share travels in the messages.
+    vi.stubGlobal("crossOriginIsolated", false);
     const worker = await startWorker();
 
     worker.send(await frame(1, {
@@ -241,6 +243,8 @@ describe("render worker", () => {
   });
 
   it("fills the irradiance cache grid in bands before shading, and exports records for the other workers", async() => {
+    // Without shared memory: what the workers cannot share travels in the messages.
+    vi.stubGlobal("crossOriginIsolated", false);
     const worker = await startWorker();
 
     worker.send(await frame(1, {
