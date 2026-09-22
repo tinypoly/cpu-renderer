@@ -78,6 +78,41 @@ void main() { if(uv.x>2.5) gl_FragColor=vec4(dFdx(uv.x)); else gl_FragColor=vec4
     expect(() => branch.runQuad(inputs, context)).toThrow("non-uniform");
   });
 
+  it("samples the base level when only implicit texture derivatives diverge", () => {
+    const sampled: unknown[] = [];
+
+    const sampling = {
+      texture: (_sampler: unknown, uv: number[], options?: unknown) => {
+        sampled.push(options);
+
+        return [uv[0], uv[1], 0, 1];
+      },
+    };
+
+    const withMap = inputs.map(i => ({ ...i, map: "map" }));
+
+    const branch = new CpuShader(`varying vec2 uv; uniform sampler2D map;
+void main() { if(uv.x>2.5) gl_FragColor=texture2D(map,uv); else gl_FragColor=vec4(0.0); }`);
+
+    const results = branch.runQuad(withMap, sampling);
+    expect(results[0]!.gl_FragColor).toEqual([0, 0, 0, 0]);
+    expect(results[1]!.gl_FragColor).toEqual([3, 3, 0, 1]);
+    expect(sampled.at(-1)).toMatchObject({ dx: [0, 0], dy: [0, 0] });
+
+    const discarded = new CpuShader(`varying vec2 uv; uniform sampler2D map;
+void main() { if(uv.x>2.5) discard; gl_FragColor=texture2D(map,uv); }`);
+
+    const kept = discarded.runQuad(withMap, sampling);
+    expect(kept[0]!.gl_FragColor).toEqual([2, 3, 0, 1]);
+    expect(kept[1]).toBeNull();
+
+    // A derivative written in the shader still requires uniform control flow.
+    const explicit = new CpuShader(`varying vec2 uv; uniform sampler2D map;
+void main() { vec4 c=vec4(0.0); if(uv.x>2.5) c=texture2D(map,uv); gl_FragColor=c+vec4(dFdx(uv.x)); }`);
+
+    expect(() => explicit.runQuad(withMap, sampling)).toThrow("non-uniform");
+  });
+
   it("keeps scalar execution, validates operands and bounds helper work", () => {
     expect(new CpuShader("void main(){gl_FragColor=vec4(1.0);}").usesDerivatives).toBe(false);
     expect(() => new CpuShader("void main(){gl_FragColor=vec4(dFdx(1));}")).toThrow("float");
