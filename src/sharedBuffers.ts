@@ -1,8 +1,16 @@
 /**
- * When the page is cross-origin isolated (COEP), buffers are allocated in a SharedArrayBuffer: every worker
- * in the pool reads the same memory instead of receiving its own copy. Otherwise, plain arrays.
+ * When the page is cross-origin isolated (COEP), or in Node, buffers are allocated in a SharedArrayBuffer: every
+ * worker in the pool reads the same memory instead of receiving its own copy. Otherwise, plain arrays.
  */
-export const shareable = () => typeof SharedArrayBuffer !== "undefined" && Boolean(globalThis.crossOriginIsolated);
+export const shareable = () => typeof SharedArrayBuffer !== "undefined"
+  && (typeof globalThis.crossOriginIsolated === "boolean" ? globalThis.crossOriginIsolated : inNode());
+
+/** Node has no `crossOriginIsolated`: `worker_threads` share memory without it. */
+function inNode(): boolean {
+  const process = (globalThis as { process?: { versions?: { node?: string } } }).process;
+
+  return typeof process?.versions?.node === "string";
+}
 
 export const sharedFloat32 = (length: number): Float32Array =>
   shareable() ? new Float32Array(new SharedArrayBuffer(length * 4)) : new Float32Array(length);

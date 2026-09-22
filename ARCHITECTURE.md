@@ -2,7 +2,7 @@
 
 This document describes how `@tinypoly/cpu-renderer` works inside. For installation and usage, see the [README](README.md).
 
-The renderer runs this software rasterizer in a pool of Web Workers (one per core minus one, capped at eight automatically; manual selection allows up to `MAX_RENDER_WORKERS` with shared memory). Geometry processing, shader interpretation, visibility, lighting, sampling, depth of field and color conversion execute on the CPU. Completed buckets are copied to the host's Canvas 2D; saving the image is plain canvas-to-PNG on the host's side. No WebGL renderer, GPU path tracer, or WebGPU device is created by this engine.
+The renderer runs this software rasterizer in a pool of workers: Web Workers in the browser, `worker_threads` in Node (one per core minus one, capped at eight automatically; manual selection allows up to `MAX_RENDER_WORKERS` with shared memory). Geometry processing, shader interpretation, visibility, lighting, sampling, depth of field and color conversion execute on the CPU. Completed buckets are handed to the host through the `pixels` event and kept in `image`; `attachCanvas` paints them on a Canvas 2D, and saving the image is plain canvas-to-PNG (or a PNG encoder over `image.data` in Node) on the host's side. `CpuRenderer` itself touches no DOM API. No WebGL renderer, GPU path tracer, or WebGPU device is created by this engine.
 
 The host application builds its scene with Three.js and keeps its own camera controls. Three remains a dependency for scene data, math and HDR decoding.
 
@@ -18,17 +18,20 @@ The host application builds its scene with Three.js and keeps its own camera con
 - `globalIllumination.ts`: diffuse path integration, cosine sampling, emissive triangle sampling with MIS, and indirect sample clamping.
 - `bvh.ts`: immutable acceleration structure for closest GI hits and direct-light shadow queries, stored in flat typed arrays and traversed iteratively with scalar math; triangles without alpha maps accept the hit without interpolating attributes.
 - `preparedGeometry.ts`: the flat, shareable layout of a prepared frame. Vertices after the vertex shader (clip, world, normal, point size, attributes and flattened varyings per group layout), triangles as group + vertex offsets, per-triangle flags, world positions and face normals, bucket bins and the BVH. Flat-shaded triangles keep their original vertices and read the face normal.
-- `sharedBuffers.ts`: typed array allocation in `SharedArrayBuffer` when the page is cross-origin isolated.
+- `sharedBuffers.ts`: typed array allocation in `SharedArrayBuffer` when the page is cross-origin isolated, or in Node.
 - `color.ts`: CPU ACES, AgX, neutral and linear display transforms.
 - `sceneSerialization.ts` and `sceneSignature.ts`: scene snapshots (shared memory when cross-origin isolated) and change detection.
 - `settings.ts`: the public `RenderSettings` (grouped by feature), the environment and the camera state, and `toFrameSettings`.
 - `frameSettings.ts`: `FrameSettings`, the flat form of the settings the engine reads for one frame.
 - `protocol.ts`: the messages between the renderer and the workers. Internal.
 - `extensions.ts`: the options read from `userData.cpuRenderer` on scenes, objects, lights and materials.
-- `renderer.ts`: `CpuRenderer`, the public class: inputs, `render()`, events, the worker pool and the Canvas 2D output.
+- `renderer.ts`: `CpuRenderer`, the public class: inputs, `render()`, events, the worker pool and the `image` buffer. It talks to workers through `RenderWorker`, the `postMessage` / `onmessage` shape of a Web Worker.
+- `canvas.ts`: `attachCanvas`, the Canvas 2D output: sizes the canvas at `start` and paints each `pixels` event.
 - `bucketScheduler.ts`: the demand-driven bucket queue, one bucket in flight per worker.
 - `events.ts`: the typed event emitter `CpuRenderer` extends.
-- `worker.ts`: per-worker preparation, cancellation, pause/resume, environment loading and bucket rendering.
+- `workerHost.ts`: per-worker preparation, cancellation, pause/resume, environment loading and bucket rendering, independent of the transport.
+- `worker.ts` and `workerNode.ts`: the worker entries, binding `workerHost.ts` to a Web Worker's global scope and to a `worker_threads` port.
+- `node.ts`: published as `/node`; `createNodeWorker` starts `workerNode.js` in a thread and `wrapNodeWorker` gives it the `RenderWorker` shape.
 - `shaderTypes.ts`: compute pipelines described as data, which a material runs through `userData.cpuRenderer.compute`.
 - `index.ts` and `engine.ts`: the two entry points. `index.ts` is the public API around `CpuRenderer`; `engine.ts`, published as `/engine`, exposes the classes above for custom workers and scripts.
 
@@ -37,7 +40,7 @@ The host application builds its scene with Three.js and keeps its own camera con
 1. `setScene` serializes the scene (`serializeScene`), which copies geometry and texture data. Transfer lists never contain the live scene's buffers. The other setters only record their input.
 2. `render()` waits for the serialization, then posts one `frame` message with every input: the scene and the environment travel only when they changed. Each frame advances a revision, and the renderer ignores output from older revisions. A frame still in flight rejects with an `AbortError`.
 3. The frame goes only to the first worker. It coalesces changes, loads and convolves the environment (or bakes the procedural sky), prepares material compute outputs and planar captures, runs the vertex stage and builds the triangles, bins and BVH, yielding between work units so incoming messages can cancel work. When the pool has readers it posts `prepared`; in every mode it reports `start`. The other workers receive `reset` when the revision opens and `adopt` with the prepared frame: they compile materials, rebuild the per-mesh uniforms and read the shared arrays, without repeating any of that work. Owner and readers render through the same accessors, so the image does not depend on which worker drew a bucket.
-4. Buckets are ordered from the center outward. The client hands one bucket at a time to each ready worker and gives it the next when it reports back, so slow buckets (glass, heavy custom shaders) do not stall the others. While a bucket renders, the worker posts the rows resolved so far at most every 30 ms (`pixels` message) and the client paints just those rows, so the image fills pixel by pixel; with depth of field each lens pass refines them. The completed bucket, with all requested samples, is still published at the end. The default is 64 × 64 pixels and four samples.
+4. Buckets are ordered from the center outward. The client hands one bucket at a time to each ready worker and gives it the next when it reports back, so slow buckets (glass, heavy custom shaders) do not stall the others. While a bucket renders, the worker posts the rows resolved so far at most every 30 ms (`pixels` message) and the client copies just those rows into `image` and hands them out as a `pixels` event, so the image fills pixel by pixel; with depth of field each lens pass refines them. The completed bucket, with all requested samples, is still published at the end. The default is 64 × 64 pixels and four samples.
 5. After the last bucket (and the denoiser, when the frame has one) `render()` resolves and `complete` fires. Pause stops every worker's pump; a new frame opens a new revision and drops stale buckets. `dispose()` terminates the pool.
 
 Storage for samples and transparent fragments is local to a bucket, and so is a small cache of vertices decoded for projection. Scene attributes, textures, compute outputs, planar captures, environment levels and the prepared geometry (vertices, triangles, bins, BVH) are allocated in `SharedArrayBuffer` when the page is cross-origin isolated, so extra workers add only their compiled materials and bucket buffers. Outside isolation the renderer uses one worker, even if a larger pool was requested. That worker keeps its prepared frame, GI cache and denoise buffers locally instead of cloning them back to the page. Vertex data is stored as `Float64Array` so the shared path reproduces the previous floating point results exactly. Render targets are limited to 32 megapixels.

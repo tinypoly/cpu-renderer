@@ -27,14 +27,32 @@ export type RenderCamera = PerspectiveCamera | OrthographicCamera | CameraState;
 /** A Three scene, serialized when set, or the result of `serializeScene`. */
 export type RenderScene = Scene | SerializedSceneResult;
 
+/** RGBA pixels of a region of the image: `data` holds `width * height * 4` bytes, row by row. */
+export interface RenderPixels {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  data: Uint8ClampedArray<ArrayBuffer>;
+}
+
+/** The whole image in RGBA bytes, straight sRGB, `width * height * 4` long. */
+export interface RenderImage {
+  width: number;
+  height: number;
+  data: Uint8ClampedArray<ArrayBuffer>;
+}
+
 export interface CpuRendererEvents {
-  /** The workers prepared the frame and are shading; the canvas has the render size. */
+  /** The workers prepared the frame and are shading; `image` has the render size and is empty. */
   start: { width: number; height: number };
+  /** Finished pixels of a region, as they arrive: paint them at (`x`, `y`). `image` already holds them. */
+  pixels: RenderPixels;
   /** Work done out of `total`: bands of the cache grid in the cache phase, buckets otherwise. */
   progress: { completed: number; total: number; phase: RenderPhase };
   /** The bucket a worker is on, or `null` when it is idle; `width` and `height` are the render size. */
   bucket: { worker: number; bucket: Bucket | null; width: number; height: number };
-  /** The image on the canvas is finished. */
+  /** `image` is finished. */
   complete: void;
   /** The frame failed; `render()` rejects with the same error. */
   error: Error;
@@ -48,33 +66,55 @@ export interface CpuRendererOptions {
   settings?: RenderSettingsInput;
   /** Defaults to `DEFAULT_RENDER_ENVIRONMENT`. */
   environment?: RenderEnvironment;
-  /** Image size in CSS pixels. Without it, each `render()` measures the canvas' CSS size. */
-  width?: number;
-  height?: number;
-  /** Defaults to `window.devicePixelRatio`. */
+  /** Image size in CSS pixels; the render size also applies `pixelRatio` and `settings.renderScale`. */
+  width: number;
+  height: number;
+  /** Defaults to 1. Pass `window.devicePixelRatio` for a sharp image on a high-density screen. */
   pixelRatio?: number;
   /** Pool size. Defaults to `defaultWorkerCount()`; capped at `MAX_RENDER_WORKERS` and at one without shared memory. */
   workers?: number;
-  /** Replace it when the bundler cannot follow `new URL("./worker.js", import.meta.url)`. */
+  /**
+   * Replace it when the bundler cannot follow `new URL("./worker.js", import.meta.url)`, or outside the browser:
+   * `@tinypoly/cpu-renderer/node` exports `createNodeWorker` for `worker_threads`.
+   */
   createWorker?: WorkerFactory;
 }
 
+/**
+ * What the renderer needs from a worker: the shape of a Web `Worker`. Any transport that carries structured clones
+ * and transfer lists fits, such as a `worker_threads` thread behind an adapter.
+ */
+export interface RenderWorker {
+  postMessage(message: WorkerRequest, transfer?: Transferable[]): void;
+  terminate(): void;
+  onmessage: ((event: MessageEvent<WorkerResponse>) => void) | null;
+  onerror: ((event: ErrorEvent) => void) | null;
+  onmessageerror: ((event: MessageEvent) => void) | null;
+}
+
 /** Creates one render worker. */
-export type WorkerFactory = () => Worker;
+export type WorkerFactory = () => RenderWorker;
 
 /** Loads `worker.js` next to this module, a pattern Vite, webpack 5 and Parcel resolve in dependencies. */
-export function createDefaultWorker(): Worker {
+export function createDefaultWorker(): RenderWorker {
+  if (typeof Worker === "undefined")
+    throw new Error("Web Workers are unavailable here. In Node, pass `createWorker: createNodeWorker` from "
+      + "@tinypoly/cpu-renderer/node.");
+
   return new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 }
 
 /** Manual upper limit; automatic mode uses a smaller pool to bound per-worker scratch memory. */
 export const MAX_RENDER_WORKERS = 32;
 
-/** One core stays free for the UI and for scene serialization. */
-export function defaultWorkerCount(): number {
-  const cores = typeof navigator !== "undefined" && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4;
+/** One core stays free for the UI and for scene serialization. `cores` defaults to `navigator.hardwareConcurrency`. */
+export function defaultWorkerCount(cores = detectCores()): number {
+  return shareable() ? Math.max(1, Math.min(8, Math.floor(cores) - 1)) : 1;
+}
 
-  return shareable() ? Math.max(1, Math.min(8, cores - 1)) : 1;
+/** Browsers and Node 21+ report it on `navigator`; elsewhere, four is a reasonable guess. */
+function detectCores(): number {
+  return typeof navigator !== "undefined" && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4;
 }
 
 /** Without shared memory, multiple readers would each clone the whole prepared scene. */
@@ -101,21 +141,22 @@ interface Size {
 }
 
 interface PendingFrame {
-  resolve: () => void;
+  resolve: (image: RenderImage) => void;
   reject: (reason: Error) => void;
 }
 
 type RequestPayload<T = WorkerRequest> = T extends WorkerRequest ? Omit<T, "revision"> : never;
 
 /**
- * Renders a Three.js scene on the CPU, in a pool of Web Workers, into a 2D canvas.
+ * Renders a Three.js scene on the CPU, in a pool of workers. It has no output of its own: `render()` resolves with
+ * the finished image, and on the way there finished pixels arrive through the `pixels` event and accumulate in
+ * `image`. `attachCanvas` paints them on a Canvas 2D.
  *
- * Setters only record the inputs; `render()` starts a frame with the current ones and resolves when the canvas
- * holds the finished image. Progress arrives through events.
+ * Setters only record the inputs; `render()` starts a frame with the current ones. Progress arrives through events.
  */
 export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
-  private workers: Worker[];
-  private context: CanvasRenderingContext2D;
+  private workers: RenderWorker[];
+  private output: RenderImage | null = null;
   private revision = 0;
   private ticket = 0;
   private disposed = false;
@@ -146,20 +187,13 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
   // The loadable part of the environment the workers last received; intensity and rotation travel in the settings.
   private sentEnvironment: string | null = null;
   private nextScene: Promise<SerializedSceneResult> | null = null;
-  private size: Size | null = null;
-  private pixelRatio: number | undefined;
+  private size: Size;
 
-  constructor(readonly canvas: HTMLCanvasElement, options: CpuRendererOptions = {}) {
+  constructor(options: CpuRendererOptions) {
     super();
-    const context = canvas.getContext("2d");
-    if (!context)
-      throw new Error("Canvas 2D is unavailable.");
-    this.context = context;
     this.current = mergeSettings(DEFAULT_RENDER_SETTINGS, options.settings);
     this.environment = options.environment ?? DEFAULT_RENDER_ENVIRONMENT;
-    this.pixelRatio = options.pixelRatio;
-    if (options.width !== undefined && options.height !== undefined)
-      this.setSize(options.width, options.height, options.pixelRatio);
+    this.size = imageSize(options.width, options.height, options.pixelRatio ?? 1);
     if (options.camera)
       this.setCamera(options.camera);
     this.setScene(options.scene ?? { scene: { meshes: [], lights: [], textures: [] }, transfer: [] });
@@ -168,7 +202,7 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
 
     this.workers = Array.from({ length: effectiveWorkerCount(options.workers ?? defaultWorkerCount()) }, (_, index) => {
       const worker = createWorker();
-      worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.handle(index, event.data);
+      worker.onmessage = event => this.handle(index, event.data);
       worker.onerror = event => this.fail(new Error(event.message || "Unable to load the CPU render worker."));
       worker.onmessageerror = () => this.fail(new Error("Unable to decode a render worker message."));
 
@@ -195,6 +229,15 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
     return this.isPaused;
   }
 
+  /**
+   * The image of the frame in flight, filled as buckets finish, or of the last one; `null` before the first frame
+   * starts. `render()` resolves with the finished one. Each frame allocates a new buffer, so a reference taken at
+   * `complete` stays as it is.
+   */
+  get image(): RenderImage | null {
+    return this.output;
+  }
+
   /** Takes a Three scene, serialized in the background, or the result of `serializeScene`. */
   setScene(scene: RenderScene) {
     this.nextScene = isThreeScene(scene) ? serializeScene(scene) : Promise.resolve(scene);
@@ -217,17 +260,21 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
     this.environment = environment;
   }
 
-  /** Fixes the image size in CSS pixels. Without it, each frame measures the canvas' CSS size. */
-  setSize(width: number, height: number, pixelRatio = this.pixelRatio ?? defaultPixelRatio()) {
-    this.size = { width: Math.max(1, Math.floor(width)), height: Math.max(1, Math.floor(height)), pixelRatio };
+  /** Image size in CSS pixels for the next frame; `pixelRatio` stays as it is when omitted. */
+  setSize(width: number, height: number, pixelRatio = this.size.pixelRatio) {
+    this.size = imageSize(width, height, pixelRatio);
+  }
+
+  setPixelRatio(pixelRatio: number) {
+    this.size = imageSize(this.size.width, this.size.height, pixelRatio);
   }
 
   /**
    * Starts a frame with the current scene, camera, settings, environment and size, discarding any frame in
-   * progress. Resolves when the canvas holds the finished image. Rejects with an `AbortError` when a later
-   * `render()` or `dispose()` replaces the frame, and with the worker's error when the frame fails.
+   * progress. Resolves with the finished image. Rejects with an `AbortError` when a later `render()` or `dispose()`
+   * replaces the frame, and with the worker's error when the frame fails.
    */
-  render(): Promise<void> {
+  render(): Promise<RenderImage> {
     const ticket = ++this.ticket;
 
     // The camera as it is at this call, even if it moves while the scene is still serializing.
@@ -244,7 +291,7 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
     });
   }
 
-  private async begin(ticket: number, camera: CameraState): Promise<void> {
+  private async begin(ticket: number, camera: CameraState): Promise<RenderImage> {
     if (this.disposed)
       throw new Error("The renderer is disposed.");
     let scene: SerializedSceneResult | null = null;
@@ -276,14 +323,14 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
       }
     }
 
-    const size = this.size ?? this.measure();
+    const size = this.size;
     // Only a different image or gradient is loaded again; intensity and rotation apply at render time.
     const source = environmentSource(this.environment), key = JSON.stringify(source);
     const environment = key === this.sentEnvironment ? undefined : source;
     this.sentEnvironment = key;
     this.abort("A newer render() replaced this frame.");
 
-    const settled = new Promise<void>((resolve, reject) => {
+    const settled = new Promise<RenderImage>((resolve, reject) => {
       this.frame = { resolve, reject };
     });
 
@@ -328,17 +375,30 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
       worker.terminate();
   }
 
-  private measure(): Size {
-    return {
-      width: Math.max(1, this.canvas.clientWidth || this.canvas.width),
-      height: Math.max(1, this.canvas.clientHeight || this.canvas.height),
-      pixelRatio: this.pixelRatio ?? defaultPixelRatio(),
-    };
+  /** Render size of the frame that started last, for the bucket events. */
+  private get rendered() {
+    return { width: this.output?.width ?? 0, height: this.output?.height ?? 0 };
   }
 
   private clearActiveBuckets() {
     for (let index = 0; index < this.workers.length; index++)
-      this.emit("bucket", { worker: index, bucket: null, width: this.canvas.width, height: this.canvas.height });
+      this.emit("bucket", { worker: index, bucket: null, ...this.rendered });
+  }
+
+  /** Copies finished rows into `image` and hands them out; rows outside the image are dropped. */
+  private paint(x: number, y: number, width: number, data: Uint8ClampedArray<ArrayBuffer>) {
+    const image = this.output;
+    if (!image || width < 1)
+      return;
+    const height = Math.floor(data.length / 4 / width);
+    const columns = Math.min(width, image.width - x), rows = Math.min(height, image.height - y);
+    if (x < 0 || y < 0 || columns < 1 || rows < 1)
+      return;
+
+    for (let row = 0; row < rows; row++)
+      image.data.set(data.subarray(row * width * 4, row * width * 4 + columns * 4), ((y + row) * image.width + x) * 4);
+
+    this.emit("pixels", { x, y, width, height, data });
   }
 
   /** Settles the frame in flight, if any, with an `AbortError`. */
@@ -357,7 +417,10 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
   private finish() {
     const frame = this.settle();
     this.emit("complete");
-    frame?.resolve();
+    if (frame && this.output)
+      frame.resolve(this.output);
+    else
+      frame?.reject(new Error("The frame finished before it started."));
   }
 
   /** Takes the frame in flight, if any, so it can be settled after the events go out. */
@@ -443,7 +506,7 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
     if (next !== null)
       this.dispatch(worker, next);
     else
-      this.emit("bucket", { worker, bucket: null, width: this.canvas.width, height: this.canvas.height });
+      this.emit("bucket", { worker, bucket: null, ...this.rendered });
     if (this.scheduler.total === 0 || this.scheduler.busy)
       return;
 
@@ -503,9 +566,13 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
       case "start": {
         if (!this.started) {
           this.started = true;
-          this.canvas.width = message.width;
-          this.canvas.height = message.height;
-          this.context.clearRect(0, 0, message.width, message.height);
+
+          this.output = {
+            width: message.width,
+            height: message.height,
+            data: new Uint8ClampedArray(message.width * message.height * 4),
+          };
+
           this.denoise = message.denoise;
           this.order = message.order;
           this.prepass = message.prepass;
@@ -525,11 +592,7 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
       }
 
       case "bucket": {
-        this.context.putImageData(
-          new ImageData(message.pixels, message.bucket.width, message.bucket.height),
-          message.bucket.x,
-          message.bucket.y,
-        );
+        this.paint(message.bucket.x, message.bucket.y, message.bucket.width, message.pixels);
         if (message.aov)
           this.slices.push({ bucket: message.bucket, data: message.aov });
         this.completeBucket(worker, message.bucket.index);
@@ -549,15 +612,11 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
         this.finish();
         break;
       case "pixels":
-        // Paints only the received row band; the full bucket still arrives later in "bucket".
-        this.context.putImageData(
-          new ImageData(message.pixels, message.bucket.width, message.pixels.length / 4 / message.bucket.width),
-          message.bucket.x,
-          message.bucket.y + message.row,
-        );
+        // Only the received row band; the full bucket still arrives later in "bucket".
+        this.paint(message.bucket.x, message.bucket.y + message.row, message.bucket.width, message.pixels);
         break;
       case "active":
-        this.emit("bucket", { worker, bucket: message.bucket, width: this.canvas.width, height: this.canvas.height });
+        this.emit("bucket", { worker, bucket: message.bucket, ...this.rendered });
         break;
       case "error":
         this.fail(new Error(message.message));
@@ -574,8 +633,11 @@ function isThreeCamera(camera: RenderCamera): camera is PerspectiveCamera | Orth
   return "isCamera" in camera && camera.isCamera === true;
 }
 
-function defaultPixelRatio(): number {
-  return typeof window !== "undefined" && window.devicePixelRatio ? window.devicePixelRatio : 1;
+function imageSize(width: number, height: number, pixelRatio: number): Size {
+  if (!Number.isFinite(pixelRatio) || pixelRatio <= 0)
+    throw new Error("CPU renderer: pixelRatio must be a positive number.");
+
+  return { width: Math.max(1, Math.floor(width)), height: Math.max(1, Math.floor(height)), pixelRatio };
 }
 
 /** A perspective camera at (5, 5, 5) looking at the origin, for a frame rendered before any camera is set. */

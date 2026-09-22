@@ -1,6 +1,6 @@
 {
   "name": "@tinypoly/cpu-renderer",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Software renderer for Three.js scenes: a multi-worker CPU rasterizer with a GLSL interpreter, BVH shadows, diffuse global illumination and denoising.",
   "keywords": [
     "three",
@@ -11,7 +11,8 @@
     "software-rendering",
     "global-illumination",
     "glsl",
-    "web-worker"
+    "web-worker",
+    "node"
   ],
   "license": "MIT",
   "author": "Danilo Gadelha",
@@ -38,10 +39,15 @@
       "types": "./dist/worker.d.ts",
       "import": "./dist/worker.js"
     },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": [
-    "./dist/worker.js"
+    "./dist/worker.js",
+    "./dist/workerNode.js"
   ],
   "files": [
     "dist",

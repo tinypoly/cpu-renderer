@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
+  attachCanvas,
   CpuRenderer,
   DEFAULT_RENDER_SETTINGS,
   mergeSettings,
@@ -56,8 +57,12 @@ let currentScene: SceneId | null = null;
 let workers: { frame: HTMLDivElement; chip: HTMLDivElement; count: HTMLSpanElement }[] = [];
 let bucketCounts: number[] = [];
 
-// The image size follows the canvas' CSS size: the renderer measures it at each frame.
-const renderer = new CpuRenderer(canvas, { settings, environment });
+// The image size follows the canvas' CSS size: the resize observer below hands it to the renderer.
+const renderer = new CpuRenderer({
+  width: canvas.clientWidth, height: canvas.clientHeight, pixelRatio: window.devicePixelRatio, settings, environment,
+});
+
+attachCanvas(renderer, canvas);
 
 // The canvas keeps the previous image until the workers start the new frame and clear it.
 renderer.on("start", () => stage.classList.remove("stale"));
@@ -472,6 +477,7 @@ new ResizeObserver(() => {
   if (!width || !height || `${width}x${height}` === size)
     return;
   size = `${width}x${height}`;
+  renderer.setSize(width, height, window.devicePixelRatio);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
   preview.resize(width, height);
