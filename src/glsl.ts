@@ -812,7 +812,8 @@ export interface ShaderContext {
 }
 
 export interface DerivativeContext {
-  evaluate(site: symbol, operation: string, value: Value): Value;
+  /** `implicit` marks the derivatives a texture takes for its mip level, which the shader never wrote. */
+  evaluate(site: symbol, operation: string, value: Value, implicit?: boolean): Value;
   /** Shared instruction allowance across all helper invocations and replays. */
   budget: { remaining: number };
 }
@@ -827,6 +828,7 @@ export function evaluateDerivativeQuad<T>(evaluate: (lane: number, context: Deri
   const resolved: { site: symbol; operation: string; values: Value[] }[] = [];
   const allowance = { remaining: budget };
   const pause = Symbol("derivative rendezvous");
+  const divergent = "derivative in non-uniform control flow or after divergent discard";
   const order = selected === undefined ? [0, 1, 2, 3] : [selected, ...[0, 1, 2, 3].filter(i => i !== selected)];
   const results: T[] = new Array(4);
 
@@ -840,8 +842,41 @@ export function evaluateDerivativeQuad<T>(evaluate: (lane: number, context: Deri
   const width = (a: Value, b: Value): Value => Array.isArray(a)
     ? a.map((v, i) => width(v, (b as Value[])[i])) : Math.abs(a as number) + Math.abs(b as number);
 
+  /**
+   * Lanes diverged where only implicit texture derivatives were pending: like a GPU, the quad keeps going.
+   * Each lane replays the derivatives resolved so far and gets zero for the rest, so textures sample the base
+   * level. A derivative the shader wrote still requires uniform control flow.
+   */
+  const withoutDerivatives = (): T[] => {
+    for (const lane of order) {
+      let cursor = 0;
+
+      results[lane] = evaluate(lane, {
+        budget: allowance,
+        evaluate(site, operation, value, implicit) {
+          const known = resolved[cursor++];
+
+          if (known) {
+            if (known.site !== site || known.operation !== operation)
+              throw new ShaderError("derivative in non-uniform control flow");
+
+            return copy(known.values[lane]);
+          }
+
+          if (!implicit)
+            throw new ShaderError(divergent);
+
+          return difference(value, value);
+        },
+      });
+      if (lane === selected) return results;
+    }
+
+    return results;
+  };
+
   for (let round = 0; round < 1024; round++) {
-    const pending: { site: symbol; operation: string; value: Value }[] = [];
+    const pending: { site: symbol; operation: string; value: Value; implicit: boolean }[] = [];
     let completed = 0;
 
     for (const lane of order) {
@@ -850,7 +885,7 @@ export function evaluateDerivativeQuad<T>(evaluate: (lane: number, context: Deri
       try {
         results[lane] = evaluate(lane, {
           budget: allowance,
-          evaluate(site, operation, value) {
+          evaluate(site, operation, value, implicit) {
             const known = resolved[cursor++];
 
             if (known) {
@@ -860,7 +895,7 @@ export function evaluateDerivativeQuad<T>(evaluate: (lane: number, context: Deri
               return copy(known.values[lane]);
             }
 
-            pending[lane] = { site, operation, value: copy(value) };
+            pending[lane] = { site, operation, value: copy(value), implicit: implicit === true };
             throw pause;
           },
         });
@@ -873,8 +908,13 @@ export function evaluateDerivativeQuad<T>(evaluate: (lane: number, context: Deri
 
     if (completed === 4) return results;
     const first = pending[0];
-    if (completed || !first || pending.some(p => p.site !== first.site || p.operation !== first.operation))
-      throw new ShaderError("derivative in non-uniform control flow or after divergent discard");
+
+    if (completed || !first || pending.some(p => p.site !== first.site || p.operation !== first.operation)) {
+      if (pending.some(Boolean) && pending.every(p => !p || p.implicit))
+        return withoutDerivatives();
+      throw new ShaderError(divergent);
+    }
+
     const values = pending.map(p => p.value);
     const dx = [difference(values[0], values[1]), difference(values[2], values[3])];
     const dy = [difference(values[0], values[2]), difference(values[1], values[3])];
@@ -1820,8 +1860,8 @@ class CompiledProgram {
         const bias = args[2] ? num(args[2](f)) : 0;
 
         if (context.derivatives && (context.textureNeedsFootprint?.(sampler) ?? true)) {
-          const dx = context.derivatives.evaluate(dxSite, "dFdx", uv) as number[];
-          const dy = context.derivatives.evaluate(dySite, "dFdy", uv) as number[];
+          const dx = context.derivatives.evaluate(dxSite, "dFdx", uv, true) as number[];
+          const dy = context.derivatives.evaluate(dySite, "dFdy", uv, true) as number[];
 
           return context.texture(sampler, uv, { dx, dy, bias });
         }
