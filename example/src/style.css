@@ -1,0 +1,1097 @@
+/* shadcn/ui-style tokens (zinc), light and dark. */
+:root {
+  --background: #ffffff;
+  --foreground: #09090b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #a1a1aa;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --accent: #f4f4f5;
+  --sidebar: #fafafa;
+  --stage: #d4d4d8;
+  --success: #16a34a;
+  --warning: #d97706;
+  --destructive: #dc2626;
+  --radius: 0.5rem;
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #09090b;
+    --foreground: #fafafa;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --border: #27272a;
+    --input: #3f3f46;
+    --ring: #71717a;
+    --primary: #fafafa;
+    --primary-foreground: #18181b;
+    --accent: #27272a;
+    --sidebar: #0c0c0e;
+    --stage: #000000;
+    --success: #22c55e;
+    --warning: #f59e0b;
+    --destructive: #ef4444;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font: 0.875rem/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+p {
+  margin: 0;
+}
+
+.muted {
+  color: var(--muted-foreground);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.icon {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-github {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* ---- Gallery ---- */
+
+.gallery {
+  min-height: 100%;
+}
+
+.gallery-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  /* Lines up with the content column below: 72rem wide with a 1rem gutter. */
+  padding: 0.75rem max(1rem, (100% - 72rem) / 2 + 1rem);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--background) 85%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.gallery-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font: 600 0.8125rem ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.gallery-brand .brand-mark {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.gallery-brand .brand-mark svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.gallery-main {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 3rem 1rem 4rem;
+}
+
+.gallery-intro {
+  max-width: 40rem;
+  margin-bottom: 2rem;
+}
+
+.gallery-intro h1 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1.625rem, 1.2rem + 1.6vw, 2.25rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.gallery-intro p {
+  color: var(--muted-foreground);
+  font-size: 1rem;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.gallery-intro p + p {
+  margin-top: 0.75rem;
+}
+
+/* Links inside running text: set apart by weight and color, not an underline. */
+.gallery-intro a,
+.gallery-footer p a {
+  color: var(--foreground);
+  font-weight: 500;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.gallery-intro a:hover,
+.gallery-footer p a:hover {
+  opacity: 0.7;
+}
+
+.gallery-intro code {
+  padding: 0.125rem 0.375rem;
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--muted);
+  color: var(--foreground);
+  font: 0.875em ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Lines up with the header and the content column, like the header does. */
+.gallery-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  padding: 1.5rem max(1rem, (100% - 72rem) / 2 + 1rem);
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+.footer-links .link {
+  font-size: 0.8125rem;
+}
+
+.gallery-footer .heart {
+  width: 0.875rem;
+  height: 0.875rem;
+  margin: 0 0.0625rem;
+  vertical-align: -0.125rem;
+  fill: currentColor;
+}
+
+.scene-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  gap: 1.25rem;
+}
+
+.scene-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+  color: inherit;
+  text-decoration: none;
+}
+
+.scene-card:hover {
+  border-color: var(--ring);
+}
+
+.scene-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
+}
+
+.scene-thumb {
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.scene-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scene-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+}
+
+.scene-body h2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.scene-body h2 .icon {
+  color: var(--muted-foreground);
+}
+
+.scene-body p {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  text-wrap: pretty;
+}
+
+/* ---- Viewer ---- */
+
+.viewer {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18.5rem;
+  height: 100%;
+}
+
+/* ---- Stage ---- */
+
+.stage {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--stage);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.stage:active {
+  cursor: grabbing;
+}
+
+.stage canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#preview {
+  transition: filter 0.3s;
+}
+
+/* Dimmed while the CPU image is unfinished: its buckets arrive in full color over it, even where both look alike. */
+.stage:is([data-state="busy"], [data-state="paused"]) #preview {
+  filter: grayscale(0.8) brightness(0.55);
+}
+
+/* Hidden while the camera moves, and until the next frame clears the last one: the WebGL preview underneath shows
+   the new view. */
+.stage.stale #output,
+.stage.interacting #output,
+.stage.interacting .buckets {
+  opacity: 0;
+}
+
+.buckets {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Corner brackets in the worker's color, like an offline renderer's bucket markers. */
+.bucket {
+  --corner: 10px;
+  position: absolute;
+  background:
+    linear-gradient(var(--worker), var(--worker)) top left / var(--corner) 2px,
+    linear-gradient(var(--worker), var(--worker)) top left / 2px var(--corner),
+    linear-gradient(var(--worker), var(--worker)) top right / var(--corner) 2px,
+    linear-gradient(var(--worker), var(--worker)) top right / 2px var(--corner),
+    linear-gradient(var(--worker), var(--worker)) bottom left / var(--corner) 2px,
+    linear-gradient(var(--worker), var(--worker)) bottom left / 2px var(--corner),
+    linear-gradient(var(--worker), var(--worker)) bottom right / var(--corner) 2px,
+    linear-gradient(var(--worker), var(--worker)) bottom right / 2px var(--corner);
+  background-repeat: no-repeat;
+  outline: 1px solid color-mix(in oklab, var(--worker) 35%, transparent);
+  outline-offset: -1px;
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / 0.6));
+}
+
+.bucket[hidden] {
+  display: none;
+}
+
+.bucket span {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--worker);
+  color: #09090b;
+  font: 600 10px/14px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Dark glass over the render, the same in both themes. Also used by the back link. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3rem 0.75rem 0.3rem 0.625rem;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  background: rgb(9 9 11 / 0.6);
+  backdrop-filter: blur(6px);
+  color: #e4e4e7;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.pill .icon {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+/* Quiet hints along the bottom of the stage, gone while the camera moves. */
+.stage-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 0.875rem;
+  display: flex;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transform: translateX(-50%);
+  pointer-events: none;
+  opacity: 0.75;
+  transition: opacity 0.2s;
+}
+
+/* Bare text and icon, lifted off the render by a soft shadow. */
+.stage-hint .pill {
+  padding: 0 0.375rem;
+  gap: 0.3125rem;
+  border: 0;
+  background: none;
+  backdrop-filter: none;
+  font-size: 0.6875rem;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
+}
+
+.stage-hint .icon {
+  width: 0.75rem;
+  height: 0.75rem;
+  filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.6));
+}
+
+.stage.interacting .stage-hint {
+  opacity: 0;
+}
+
+.progress {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  pointer-events: none;
+}
+
+#progress-bar {
+  width: 0;
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.15s linear;
+}
+
+/* ---- Sidebar ---- */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--sidebar);
+  border-left: 1px solid var(--border);
+}
+
+.sidebar-header {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Leads back to the gallery, like the back link over the stage. */
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: -0.375rem;
+  padding: 0.375rem;
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color 0.15s;
+}
+
+.sidebar-brand:hover {
+  background: var(--accent);
+}
+
+.sidebar-brand:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+/* The Tinypoly icon ships unfilled: it takes the text color here. */
+.brand-mark svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: currentColor;
+}
+
+.sidebar-header h1 {
+  margin: 0;
+  font: 600 0.8125rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.sidebar-header p {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.sidebar-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 0;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.sidebar-content > * {
+  flex-shrink: 0;
+}
+
+/* Floats over the stage's top-left corner. */
+.back-link {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 1;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.back-link:hover {
+  background: rgb(9 9 11 / 0.8);
+  color: #fafafa;
+}
+
+.back-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
+}
+
+.hint {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+/* Collapsible sections, like shadcn's Collapsible: a trigger row with a chevron. */
+.group {
+  border-bottom: 1px solid var(--border);
+}
+
+.group:last-child {
+  border-bottom: 0;
+}
+
+.group-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 -0.5rem;
+  padding: 0.5rem;
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s;
+}
+
+.group-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.group-trigger:hover {
+  background: var(--accent);
+}
+
+.group-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
+}
+
+.group-trigger > span:first-of-type {
+  flex: 1;
+}
+
+.group-trigger > .icon:first-child {
+  color: var(--muted-foreground);
+  transition: color 0.15s;
+}
+
+.group-trigger:hover > .icon:first-child,
+.group[open] > .group-trigger > .icon:first-child {
+  color: var(--foreground);
+}
+
+.chevron {
+  color: var(--muted-foreground);
+  transform: rotate(-90deg);
+  transition: transform 0.15s;
+}
+
+.group[open] > .group-trigger .chevron {
+  transform: none;
+}
+
+.group-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem 0 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.field label,
+.switch-row > span {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.field output {
+  color: var(--muted-foreground);
+  font: 0.75rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.is-disabled {
+  opacity: 0.5;
+}
+
+.is-disabled * {
+  cursor: not-allowed !important;
+}
+
+/* ---- Select ---- */
+
+.select {
+  width: 100%;
+  height: 2.25rem;
+  padding: 0 2rem 0 0.75rem;
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--background) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 0.625rem center;
+  box-shadow: var(--shadow-xs);
+  color: inherit;
+  font: inherit;
+  appearance: none;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.select:focus-visible,
+.button:focus-visible,
+.switch:focus-visible,
+.slider:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
+}
+
+.select:focus-visible {
+  border-color: var(--ring);
+}
+
+/* Custom dropdown (see select.ts): the trigger replaces the native select, the list opens in the top layer. */
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-right: 0.625rem;
+  background-image: none;
+  text-align: left;
+}
+
+.select-trigger .icon {
+  color: var(--muted-foreground);
+  transition: transform 0.15s;
+}
+
+.select-trigger[aria-expanded="true"] .icon {
+  transform: rotate(180deg);
+}
+
+.select-trigger:disabled {
+  cursor: not-allowed;
+}
+
+.select-content {
+  position: fixed;
+  inset: auto;
+  max-height: 16rem;
+  margin: 0;
+  padding: 0.25rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  color: var(--foreground);
+  font: 0.875rem/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+  outline: none;
+}
+
+.select-content:popover-open {
+  animation: select-in 0.12s ease-out;
+}
+
+@keyframes select-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(var(--from-y, -4px));
+  }
+}
+
+.select-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: calc(var(--radius) - 4px);
+  cursor: default;
+  user-select: none;
+}
+
+.select-item.is-active {
+  background: var(--accent);
+}
+
+.select-item .icon {
+  visibility: hidden;
+}
+
+.select-item[aria-selected="true"] .icon {
+  visibility: visible;
+}
+
+/* ---- Switch ---- */
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: pointer;
+}
+
+.switch-row small {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.switch {
+  position: relative;
+  width: 2rem;
+  height: 1.15rem;
+  flex: none;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--input);
+  box-shadow: var(--shadow-xs);
+  appearance: none;
+  cursor: pointer;
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+
+.switch::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 1px;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--background);
+  transform: translateY(-50%);
+  transition: transform 0.15s;
+}
+
+.switch:checked {
+  background: var(--primary);
+}
+
+.switch:checked::before {
+  background: var(--primary-foreground);
+  transform: translate(calc(2rem - 1rem - 4px), -50%);
+}
+
+/* ---- Slider ---- */
+
+.slider {
+  --fill: 50%;
+  width: 100%;
+  height: 1rem;
+  margin: 0;
+  background: transparent;
+  appearance: none;
+  cursor: pointer;
+}
+
+.slider::-webkit-slider-runnable-track {
+  height: 0.375rem;
+  border-radius: 999px;
+  background: linear-gradient(var(--primary), var(--primary)) 0 / var(--fill) 100% no-repeat, var(--muted);
+}
+
+.slider::-moz-range-track {
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.slider::-moz-range-progress {
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+.slider::-webkit-slider-thumb {
+  width: 1rem;
+  height: 1rem;
+  margin-top: -0.3125rem;
+  border: 1px solid var(--primary);
+  border-radius: 50%;
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+  appearance: none;
+  transition: box-shadow 0.15s;
+}
+
+.slider::-moz-range-thumb {
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--primary);
+  border-radius: 50%;
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+}
+
+.slider:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--ring) 35%, transparent);
+}
+
+/* ---- Badge ---- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+}
+
+.badge-outline {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+#phase::before {
+  content: "";
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+#phase[data-state="busy"]::before {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+#phase[data-state="done"] {
+  background: color-mix(in oklab, var(--success) 15%, transparent);
+  color: var(--success);
+}
+
+#phase[data-state="paused"],
+#phase[data-state="preview"] {
+  background: color-mix(in oklab, var(--warning) 15%, transparent);
+  color: var(--warning);
+}
+
+#phase[data-state="error"] {
+  background: color-mix(in oklab, var(--destructive) 15%, transparent);
+  color: var(--destructive);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ---- Workers ---- */
+
+.workers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr));
+  gap: 0.375rem;
+}
+
+.worker {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--background);
+  font-size: 0.75rem;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.worker[data-active="true"] {
+  border-color: color-mix(in oklab, var(--worker) 60%, var(--border));
+  background: color-mix(in oklab, var(--worker) 10%, var(--background));
+}
+
+.worker-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 2px;
+  background: var(--worker);
+  opacity: 0.35;
+}
+
+.worker[data-active="true"] .worker-dot {
+  opacity: 1;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--worker) 25%, transparent);
+}
+
+.worker-name {
+  font-weight: 500;
+}
+
+.worker-count {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font: 0.6875rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Footer ---- */
+
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.card {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+}
+
+.status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.status-card p {
+  font-size: 0.8125rem;
+}
+
+.status-card p.muted {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.meter {
+  height: 0.375rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+#meter-bar {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 0.15s linear;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 2.25rem;
+  padding: 0 1rem;
+  border: 1px solid var(--primary);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--primary);
+  box-shadow: var(--shadow-xs);
+  color: var(--primary-foreground);
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s, opacity 0.15s;
+}
+
+.button:hover {
+  opacity: 0.9;
+}
+
+.button-outline {
+  border-color: var(--input);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.button-outline:hover {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  text-decoration: none;
+  text-align: center;
+  transition: color 0.15s;
+}
+
+.link:hover {
+  color: var(--foreground);
+}
+
+@media (max-width: 48rem) {
+  .viewer {
+    grid-template-columns: 1fr;
+    grid-template-rows: 60vh auto;
+    height: auto;
+  }
+
+  .sidebar {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .sidebar-content {
+    overflow: visible;
+  }
+}

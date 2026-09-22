@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A Three.js scene rendered entirely on the CPU, in Web Workers, by @tinypoly/cpu-renderer." />
+    <title>@tinypoly/cpu-renderer</title>
+  </head>
+  <body>
+    <div class="gallery" id="gallery">
+      <header class="gallery-header">
+        <div class="gallery-brand">
+          <div class="brand-mark" aria-hidden="true"></div>
+          <span>@tinypoly/cpu-renderer</span>
+        </div>
+        <a class="link" href="https://github.com/tinypoly/cpu-renderer">
+          <svg class="icon icon-github" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-1.97c-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z" /></svg>
+          <span>GitHub</span>
+        </a>
+      </header>
+
+      <main class="gallery-main">
+        <section class="gallery-intro">
+          <h1>Three.js scenes, rendered on the CPU</h1>
+          <p>A software renderer for <a href="https://threejs.org">Three.js</a> scenes. It takes an ordinary <code>THREE.Scene</code> and renders it on the CPU across a pool of Web Workers, bucket by bucket, into a 2D canvas. It never creates a WebGL context.</p>
+          <p>It powers the render mode of the <a href="https://tinypoly.com">Tinypoly</a> editor.</p>
+        </section>
+        <div class="scene-grid" id="scene-grid"></div>
+      </main>
+
+      <footer class="gallery-footer">
+        <p>Made with <svg class="icon heart" viewBox="0 0 24 24" role="img" aria-label="love"><path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5" /></svg> by <a href="https://github.com/dngadelha">Danilo Gadelha</a></p>
+        <nav class="footer-links">
+          <a class="link" href="https://tinypoly.com/donate">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 14h2a2 2 0 0 0 0-4h-3c-.6 0-1.1.2-1.4.6L3 16" /><path d="m14.45 13.39 5.05-4.694C20.196 8 21 6.85 21 5.75a2.75 2.75 0 0 0-4.797-1.837.276.276 0 0 1-.406 0A2.75 2.75 0 0 0 11 5.75c0 1.2.802 2.248 1.5 2.946L16 11.95" /><path d="m2 15 6 6" /><path d="m7 20 1.6-1.4c.3-.4.8-.6 1.4-.6h4c1.1 0 2.1-.4 2.8-1.2l4.6-4.4a1 1 0 0 0-2.75-2.91" /></svg>
+            <span>Support the project</span>
+          </a>
+          <a class="link" href="https://tinypoly.com">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10" /><path d="M7 17 17 7" /></svg>
+            <span>Discover Tinypoly</span>
+          </a>
+        </nav>
+      </footer>
+    </div>
+
+    <div class="viewer" id="viewer" hidden>
+      <main class="stage" id="stage" aria-label="Rendered image. Drag to orbit, scroll to zoom.">
+        <!-- WebGL preview while the camera moves; the CPU image is painted over it bucket by bucket. -->
+        <canvas id="preview" aria-hidden="true"></canvas>
+        <canvas id="output"></canvas>
+        <div class="buckets" id="buckets" aria-hidden="true"></div>
+        <ul class="stage-hint" aria-hidden="true">
+          <li class="pill">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.466 7.5C15.643 4.237 13.952 2 12 2 9.239 2 7 6.477 7 12s2.239 10 5 10c.342 0 .677-.069 1-.2" /><path d="m15.194 13.707 3.814 1.86-1.86 3.814" /><path d="M19 15.57c-1.804.885-4.274 1.43-7 1.43-5.523 0-10-2.239-10-5s4.477-5 10-5c4.838 0 8.873 1.718 9.8 4" /></svg>
+            <span>Drag to orbit</span>
+          </li>
+          <li class="pill">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="7" /><path d="M12 6v4" /></svg>
+            <span>Scroll to zoom</span>
+          </li>
+          <li class="pill">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4.1 12 6" /><path d="m5.1 8-2.9-.8" /><path d="m6 12-1.9 2" /><path d="M7.2 2.2 8 5.1" /><path d="M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z" /></svg>
+            <span>Release to render</span>
+          </li>
+        </ul>
+        <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
+      </main>
+
+      <!-- Outside the stage so a click on it does not start an orbit. -->
+      <a class="pill back-link" href="#">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>
+        <span>All scenes</span>
+      </a>
+
+      <aside class="sidebar">
+        <header class="sidebar-header">
+          <a class="sidebar-brand" href="#" aria-label="All scenes">
+            <div class="brand-mark" aria-hidden="true"></div>
+            <div>
+              <h1>@tinypoly/cpu-renderer</h1>
+              <p>CPU renderer for Three.js</p>
+            </div>
+          </a>
+        </header>
+
+        <div class="sidebar-content">
+          <details class="group" data-section="scene" open>
+            <summary class="group-trigger">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /><path d="m3.3 7 8.7 5 8.7-5" /><path d="M12 22V12" /></svg>
+              <span>Scene</span><svg class="icon chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></summary>
+            <div class="group-content">
+              <div class="field">
+                <label for="scene">Preset</label>
+                <!-- Filled from the scene catalog. -->
+                <select id="scene" class="select"></select>
+              </div>
+            </div>
+          </details>
+
+          <details class="group" data-section="quality">
+            <summary class="group-trigger">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 14 4-4" /><path d="M3.34 19a10 10 0 1 1 17.32 0" /></svg>
+              <span>Quality</span><svg class="icon chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></summary>
+            <div class="group-content">
+              <div class="field">
+                <label for="maxSamples">Antialiasing</label>
+                <select id="maxSamples" class="select">
+                  <option value="1">1 sample</option>
+                  <option value="4" selected>4 samples</option>
+                  <option value="16">16 samples</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="renderScale">Resolution</label>
+                <select id="renderScale" class="select">
+                  <option value="0.5">Half</option>
+                  <option value="1" selected>Full</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="tonemapping">Tone mapping</label>
+                <select id="tonemapping" class="select">
+                  <option value="aces">ACES</option>
+                  <option value="agx">AgX</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="linear">Linear</option>
+                </select>
+              </div>
+            </div>
+          </details>
+
+          <details class="group" data-section="lighting">
+            <summary class="group-trigger">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" /><path d="M2 12h2" /><path d="M20 12h2" /><path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" /></svg>
+              <span>Lighting</span><svg class="icon chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></summary>
+            <div class="group-content">
+              <label class="switch-row">
+                <span>Global illumination<small>Diffuse path tracing</small></span>
+                <input type="checkbox" role="switch" class="switch" id="globalIllumination" />
+              </label>
+              <div class="field">
+                <label for="giSamples">GI samples</label>
+                <select id="giSamples" class="select">
+                  <option value="16">16</option>
+                  <option value="64" selected>64</option>
+                  <option value="256">256</option>
+                </select>
+              </div>
+              <label class="switch-row">
+                <span>Denoise<small>Filters the indirect light</small></span>
+                <input type="checkbox" role="switch" class="switch" id="giDenoise" checked />
+              </label>
+              <label class="switch-row">
+                <span>Ambient occlusion</span>
+                <input type="checkbox" role="switch" class="switch" id="ambientOcclusion" checked />
+              </label>
+              <div class="field">
+                <div class="field-head">
+                  <label for="shadowSoftness">Soft shadows</label>
+                  <output for="shadowSoftness" data-unit="°"></output>
+                </div>
+                <input type="range" class="slider" id="shadowSoftness" min="0" max="6" step="0.5" value="1" />
+              </div>
+            </div>
+          </details>
+
+          <details class="group" data-section="camera">
+            <summary class="group-trigger">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z" /><circle cx="12" cy="13" r="3" /></svg>
+              <span>Camera</span><svg class="icon chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></summary>
+            <div class="group-content">
+              <label class="switch-row">
+                <span>Depth of field<small>Focuses on the orbit target</small></span>
+                <input type="checkbox" role="switch" class="switch" id="dofEnabled" />
+              </label>
+              <div class="field">
+                <div class="field-head">
+                  <label for="dofAperture">Aperture</label>
+                  <output for="dofAperture" data-prefix="f/"></output>
+                </div>
+                <input type="range" class="slider" id="dofAperture" min="0.5" max="8" step="0.1" value="1.4" />
+              </div>
+            </div>
+          </details>
+
+          <details class="group" data-section="workers" open>
+            <summary class="group-trigger">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20v2" /><path d="M12 2v2" /><path d="M17 20v2" /><path d="M17 2v2" /><path d="M2 12h2" /><path d="M2 17h2" /><path d="M2 7h2" /><path d="M20 12h2" /><path d="M20 17h2" /><path d="M20 7h2" /><path d="M7 20v2" /><path d="M7 2v2" /><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="8" y="8" width="8" height="8" rx="1" /></svg>
+              <span>Workers</span><span class="badge badge-outline" id="worker-count"></span><svg class="icon chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></summary>
+            <div class="group-content">
+              <div class="workers" id="worker-list"></div>
+              <p class="hint" id="workers-note">The page is not cross-origin isolated, so a single worker renders.</p>
+            </div>
+          </details>
+        </div>
+
+        <footer class="sidebar-footer">
+          <div class="card status-card">
+            <div class="status-head">
+              <span class="badge" id="phase" data-state="idle">Preparing</span>
+              <span class="muted" id="elapsed">0.0 s</span>
+            </div>
+            <p id="status" role="status">Preparing…</p>
+            <div class="meter" aria-hidden="true"><div id="meter-bar"></div></div>
+            <p class="muted" id="resolution"></p>
+          </div>
+          <div class="actions">
+            <button id="pause" type="button" class="button button-outline">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+              <span>Pause</span>
+            </button>
+            <button id="save" type="button" class="button">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /><path d="M12 15V3" /></svg>
+              <span>Save PNG</span>
+            </button>
+          </div>
+          <a class="link" href="https://github.com/tinypoly/cpu-renderer">
+            <svg class="icon icon-github" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-1.97c-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z" /></svg>
+            <span>Source on GitHub</span>
+          </a>
+        </footer>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
