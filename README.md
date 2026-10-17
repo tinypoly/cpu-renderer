@@ -18,7 +18,7 @@ It powers the render mode of the [Tinypoly](https://tinypoly.com) editor.
 - BVH ray-traced shadows with soft penumbrae, and ambient occlusion.
 - Diffuse global illumination with an irradiance cache, an SVGF-style denoiser and environment importance sampling.
 - HDR or gradient environments, depth of field with polygonal bokeh, fog, vignette and grain, and ACES, AgX or Neutral tone mapping.
-- Progressive output: pixels arrive as they finish, and the render can be paused and resumed.
+- Progressive output: pixels arrive as they finish, and the render can be paused, resumed and cancelled.
 - With cross-origin isolation, or in Node, the workers share the prepared scene through `SharedArrayBuffer`, so adding a worker costs almost no memory.
 - No DOM dependency: the renderer takes a size and hands back pixels. The browser canvas and the Node worker threads are adapters around it.
 
@@ -100,7 +100,7 @@ Every option has a setter of the same name.
 
 | Method | |
 | --- | --- |
-| `render()` | Starts a frame with the current inputs and discards the one in progress. Resolves with the finished image, `{ width, height, data }`: `data` is RGBA bytes, straight sRGB, `width * height * 4` long. Rejects with an `AbortError` (see `isAbortError`) when a later `render()` or `dispose()` replaces the frame, and with the worker's error when the frame fails. |
+| `render()` | Starts a frame with the current inputs and discards the one in progress. Resolves with the finished image, `{ width, height, data }`: `data` is RGBA bytes, straight sRGB, `width * height * 4` long. Rejects with an `AbortError` (see `isAbortError`) when a later `render()`, `cancel()` or `dispose()` replaces the frame, and with the worker's error when the frame fails. |
 | `setScene(scene)` | A Three scene is serialized in the background; `render()` waits for it. |
 | `setCamera(camera)` | A Three camera is read as it is at every `render()`, so moving it or changing its aspect only needs a new frame. A `CameraState` from `serializeCamera` stays fixed. |
 | `setSettings(settings)` | Merges the given fields into the current settings, group by group: `{ fog: { enabled: true } }` keeps the other fog fields. |
@@ -108,6 +108,7 @@ Every option has a setter of the same name.
 | `setSize(width, height, pixelRatio?)` | Image size in CSS pixels for the next frame; the pixel ratio stays unless given. |
 | `setPixelRatio(pixelRatio)` | |
 | `pause()`, `resume()` | Stops or continues every worker on the same frame. |
+| `cancel()` | Stops the frame in flight and keeps the workers for the next one. `render()` rejects with an `AbortError` and `image` keeps what was already painted. A paused frame is cancelled too, and the next one starts unpaused. |
 | `dispose()` | Terminates the workers. |
 | `settings` | The settings the next frame renders with. |
 | `rendering`, `paused` | Whether a frame is in flight and whether the workers are paused. |
@@ -203,7 +204,7 @@ light.userData.cpuRenderer = { volumetric: { density: 0.05 } } satisfies CpuRend
 | `serializeScene(scene)` | Async. The snapshot `setScene` builds from a Three scene, to reuse across renderers or build off the main thread. |
 | `serializeCamera(camera)` | A fixed `CameraState` snapshot of a Three camera, including zoom and view offsets. |
 | `sceneSignature(scene)` | A string that changes whenever something the renderer reads changes. Compare it before re-serializing an interactive scene. |
-| `isAbortError(error)` | Whether a `render()` rejection means the frame was replaced rather than failed. |
+| `isAbortError(error)` | Whether a `render()` rejection means the frame was replaced or cancelled rather than failed. |
 | `shareable()` | Whether the workers can share memory: a cross-origin isolated page, or Node. Without it a single worker runs. |
 | `defaultWorkerCount(cores?)` | The pool size used when `workers` is omitted: `cores` (default `navigator.hardwareConcurrency`) minus one, at most 8, or 1 without shared memory. |
 
