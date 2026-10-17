@@ -122,7 +122,7 @@ export function effectiveWorkerCount(requested: number): number {
   return shareable() ? Math.max(1, Math.min(MAX_RENDER_WORKERS, Math.floor(requested) || 1)) : 1;
 }
 
-/** `render()` rejects with this when a newer frame, or `dispose()`, replaced the frame it started. */
+/** `render()` rejects with this when a newer frame, `cancel()` or `dispose()` replaced the frame it started. */
 export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -362,6 +362,36 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
       return;
     this.isPaused = false;
     this.broadcast({ type: "pause", paused: false });
+  }
+
+  /**
+   * Stops the frame in flight and keeps the workers for the next one. `render()` rejects with an `AbortError`, the
+   * workers drop what they were doing and `image` keeps what was already painted. A paused frame is cancelled too,
+   * and the next one starts unpaused. Does nothing without a frame in flight.
+   */
+  cancel() {
+    if (this.disposed || this.active === null)
+      return;
+    // A scene still serializing for this frame is dropped as well: `begin` sees a newer ticket.
+    this.ticket++;
+    this.active = null;
+    // A new revision: buckets, records and denoised bands of the cancelled frame arriving later are ignored.
+    this.revision++;
+    this.started = false;
+    this.denoising = false;
+    this.slices = [];
+    this.readyWorkers.clear();
+    this.scheduler.reset([]);
+    for (const worker of this.workers)
+      worker.postMessage({ type: "reset", revision: this.revision } satisfies WorkerRequest);
+
+    if (this.isPaused) {
+      this.isPaused = false;
+      this.broadcast({ type: "pause", paused: false });
+    }
+
+    this.clearActiveBuckets();
+    this.abort("The frame was cancelled.");
   }
 
   /** Terminates the workers. A frame in flight rejects with an `AbortError`. */

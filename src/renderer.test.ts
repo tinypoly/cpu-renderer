@@ -228,6 +228,69 @@ describe("CpuRenderer", () => {
   });
 });
 
+describe("cancel", () => {
+  it("rejects the frame, resets every worker in a new revision and ignores late buckets", async() => {
+    vi.stubGlobal("crossOriginIsolated", true);
+    const renderer = create({ workers: 2 });
+    const [owner] = FakeWorker.instances;
+    const done = renderer.render();
+    await settle();
+    const { revision } = owner.last("frame")!;
+    owner.reply({ type: "start", revision, width: 32, height: 32, order: [0, 1], denoise: false, prepass: [] });
+    const completes = vi.fn();
+    renderer.on("complete", completes);
+
+    renderer.cancel();
+    await expect(done).rejects.toSatisfy(isAbortError);
+    expect(renderer.rendering).toBe(false);
+    for (const worker of FakeWorker.instances)
+      expect(worker.last("reset")?.revision).toBe(revision + 1);
+
+    // Buckets the workers had in hand arrive after the cancel and finish nothing.
+    const pixels = new Uint8ClampedArray(16 * 32 * 4);
+    owner.reply({ type: "bucket", revision, bucket: { x: 0, y: 0, width: 32, height: 16, index: 0 }, pixels });
+    owner.reply({ type: "bucket", revision, bucket: { x: 0, y: 16, width: 32, height: 16, index: 1 }, pixels });
+    expect(completes).not.toHaveBeenCalled();
+    renderer.dispose();
+  });
+
+  it("unpauses, so the next frame runs", async() => {
+    vi.stubGlobal("crossOriginIsolated", true);
+    const renderer = create({ workers: 1 });
+    const [worker] = FakeWorker.instances;
+    void renderer.render().catch(() => {});
+    await settle();
+    renderer.pause();
+    renderer.cancel();
+
+    expect(renderer.paused).toBe(false);
+    expect(worker.last("pause")?.paused).toBe(false);
+    renderer.dispose();
+  });
+
+  it("does nothing without a frame in flight", () => {
+    const renderer = create({ workers: 1 });
+    const [worker] = FakeWorker.instances;
+    renderer.cancel();
+
+    expect(worker.last("reset")).toBeUndefined();
+    renderer.dispose();
+  });
+
+  it("drops a frame whose scene is still serializing", async() => {
+    const renderer = create({ workers: 1 });
+    const [worker] = FakeWorker.instances;
+    renderer.setScene(emptyScene());
+    const done = renderer.render();
+    renderer.cancel();
+
+    await expect(done).rejects.toSatisfy(isAbortError);
+    await settle();
+    expect(worker.last("frame")).toBeUndefined();
+    renderer.dispose();
+  });
+});
+
 describe("CpuRenderer frame phases", () => {
   it("fills the cache grid level by level, shares its records with every worker, then shades", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
