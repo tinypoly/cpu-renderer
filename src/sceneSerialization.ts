@@ -468,7 +468,8 @@ export interface SerializeOptions {
   mipmaps?: boolean;
 }
 
-export async function serializeTexture(texture: THREE.Texture, options: SerializeOptions = {}): Promise<SerializedTexture> {
+export async function serializeTexture(
+  texture: THREE.Texture, options: SerializeOptions = {}): Promise<SerializedTexture> {
   const withMipmaps = options.mipmaps ?? true;
   // KTX2Loader transcodes to plain RGBA bytes when no GPU block format is available: those levels are readable.
   if ((texture as THREE.CompressedTexture).isCompressedTexture && (texture.format !== THREE.RGBAFormat
@@ -546,7 +547,8 @@ export function traverseRendered(object: THREE.Object3D, visit: (object: THREE.O
     traverseRendered(child, visit);
 }
 
-export async function serializeScene(scene: THREE.Scene, options: SerializeOptions = {}): Promise<SerializedSceneResult> {
+export async function serializeScene(
+  scene: THREE.Scene, options: SerializeOptions = {}): Promise<SerializedSceneResult> {
   const withMipmaps = options.mipmaps ?? true;
   const sceneFog = scene.fog as (THREE.Fog & THREE.FogExp2) | null;
   prepareCpuMaterials(scene);
