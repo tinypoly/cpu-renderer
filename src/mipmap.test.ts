@@ -57,6 +57,19 @@ describe("mipmap transport and generation", () => {
     expect((await serializeTexture(texture)).mipmaps).toBeUndefined();
   });
 
+  it("leaves the chain out when the snapshot asks for the base level only", async() => {
+    expect((await serializeTexture(checker(4), { mipmaps: false })).mipmaps).toBeUndefined();
+    const supplied = new THREE.DataTexture(new Uint8Array(64), 4, 4);
+    supplied.mipmaps = [solid(4, 4, [255, 0, 0, 255]), solid(2, 2, [0, 255, 0, 255])];
+    const base = await serializeTexture(supplied, { mipmaps: false });
+    expect([base.width, base.height, base.mipmaps]).toEqual([4, 4, undefined]);
+    const scene = new THREE.Scene();
+    scene.add(new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial({ map: checker(4) })));
+    const { scene: snapshot } = await serializeScene(scene, { mipmaps: false });
+    expect(snapshot.textures[0].mipmaps).toBeUndefined();
+    expect((await serializeScene(scene)).scene.textures[0].mipmaps).toHaveLength(2);
+  });
+
   it("includes odd-dimension edges and preserves HDR and alpha", async() => {
     const data = new Float32Array(3 * 5 * 4);
     for (let i = 0; i < 15; i++) data.set([i === 14 ? 30 : 0, 4, 8, .25], i * 4);

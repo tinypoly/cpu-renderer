@@ -459,7 +459,18 @@ function cubeToEquirect(texture: THREE.Texture, images = texture.image) {
   return { width, height, data, byteTexture };
 }
 
-export async function serializeTexture(texture: THREE.Texture): Promise<SerializedTexture> {
+/** What a snapshot carries beyond what every renderer needs. */
+export interface SerializeOptions {
+  /**
+   * Whether textures carry their mip chain, generated or supplied. The CPU renderer filters through it; a renderer
+   * that samples only the base level passes `false` and skips building it. Defaults to `true`.
+   */
+  mipmaps?: boolean;
+}
+
+export async function serializeTexture(
+  texture: THREE.Texture, options: SerializeOptions = {}): Promise<SerializedTexture> {
+  const withMipmaps = options.mipmaps ?? true;
   // KTX2Loader transcodes to plain RGBA bytes when no GPU block format is available: those levels are readable.
   if ((texture as THREE.CompressedTexture).isCompressedTexture && (texture.format !== THREE.RGBAFormat
     || (texture as THREE.CompressedArrayTexture).isCompressedArrayTexture
@@ -467,7 +478,7 @@ export async function serializeTexture(texture: THREE.Texture): Promise<Serializ
     || !(texture.mipmaps[0] as ReadableImage | undefined)?.data))
     throw new Error("CPU renderer: compressed textures are unsupported unless transcoded to RGBA (KTX2Loader without a GPU format).");
   const cube = (texture as THREE.CubeTexture).isCubeTexture;
-  const manual = texture.mipmaps;
+  const manual = withMipmaps ? texture.mipmaps : [];
   const image = (!cube && manual.length ? manual[0] : texture.image) as ReadableImage | unknown[] | undefined;
   if (texture.isRenderTargetTexture || (cube ? !Array.isArray(image) || image.length !== 6
     : !image || Array.isArray(image) || !image.width || !image.height))
@@ -509,7 +520,7 @@ export async function serializeTexture(texture: THREE.Texture): Promise<Serializ
 
     // A converted cube's last 1x1 face is a 4x2 equirectangular image; finish its proxy chain.
     if (cube) mipmaps.push(...generateMipmaps({ ...previous, colorSpace: base.colorSpace }));
-  } else if (texture.generateMipmaps) mipmaps.push(...generateMipmaps(base));
+  } else if (withMipmaps && texture.generateMipmaps) mipmaps.push(...generateMipmaps(base));
   const metadata = textureMetadata(texture, { ...base, ...(mipmaps.length ? { mipmaps } : {}) });
 
   return cube ? { ...metadata, flipY: false, wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping,
@@ -536,7 +547,9 @@ export function traverseRendered(object: THREE.Object3D, visit: (object: THREE.O
     traverseRendered(child, visit);
 }
 
-export async function serializeScene(scene: THREE.Scene): Promise<SerializedSceneResult> {
+export async function serializeScene(
+  scene: THREE.Scene, options: SerializeOptions = {}): Promise<SerializedSceneResult> {
+  const withMipmaps = options.mipmaps ?? true;
   const sceneFog = scene.fog as (THREE.Fog & THREE.FogExp2) | null;
   prepareCpuMaterials(scene);
   const meshes: SerializedMesh[] = [], lights: SerializedLight[] = [];
@@ -722,17 +735,17 @@ export async function serializeScene(scene: THREE.Scene): Promise<SerializedScen
   const pixelCache = new Map<object, Map<string, TexturePixels>>();
 
   for (const texture of textures.values()) {
-    const key = `${texture.type}:${texture.colorSpace}:${texture.generateMipmaps}`;
+    const key = `${texture.type}:${texture.colorSpace}:${withMipmaps && texture.generateMipmaps}`;
     const source = pixelCache.get(texture.source);
 
-    const cached = texture.isRenderTargetTexture || texture.mipmaps.length
+    const cached = texture.isRenderTargetTexture || (withMipmaps && texture.mipmaps.length)
       || (texture as THREE.CubeTexture).isCubeTexture
       ? undefined : source?.get(key);
 
-    const serialized = cached ? textureMetadata(texture, cached) : await serializeTexture(texture);
+    const serialized = cached ? textureMetadata(texture, cached) : await serializeTexture(texture, options);
     serializedTextures.push(serialized);
 
-    if (!cached && !texture.mipmaps.length) {
+    if (!cached && !(withMipmaps && texture.mipmaps.length)) {
       const entries = source ?? new Map<string, TexturePixels>();
       entries.set(key, { width: serialized.width, height: serialized.height,
         data: serialized.data, colorSpace: serialized.colorSpace, mipmaps: serialized.mipmaps });
