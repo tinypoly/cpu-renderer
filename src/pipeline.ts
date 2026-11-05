@@ -7,14 +7,32 @@ import { CpuComputePipeline, floatTexture } from "./compute.js";
 import type { CpuEnvironment } from "./environment.js";
 import { CpuRasterizer } from "./rasterizer.js";
 
+/** Images a planar surface captures: reflection, environment reflection and refraction. */
+const PLANAR_CAPTURES = 3;
+
 /** A completed bake survives camera/quality changes. An interrupted bake never enters the cache. */
 export class CpuScenePipeline {
   private computed = new Map<string, Record<string, SerializedTexture>>();
 
   constructor(readonly source: SerializedScene) {}
 
+  /** Steps `prepare` reports through `step`: each simulation not baked yet and each planar capture. */
+  preparationSteps(): number {
+    const simulations = new Set<string>();
+    let captures = 0;
+
+    for (const mesh of this.source.meshes)
+      for (const material of mesh.materials) {
+        if (!material.shader) continue;
+        if (material.compute && !this.computed.has(material.compute.id)) simulations.add(material.compute.id);
+        if (material.planarCapture && !mesh.primitive) captures += PLANAR_CAPTURES;
+      }
+
+    return simulations.size + captures;
+  }
+
   *prepare(camera: CameraState, settings: FrameSettings, width: number, height: number,
-    environment: CpuEnvironment): Generator<void, SerializedScene> {
+    environment: CpuEnvironment, step?: () => void): Generator<void, SerializedScene> {
     const materials = new Map<SerializedMaterial, SerializedMaterial>();
 
     const scene: SerializedScene = {
@@ -48,6 +66,7 @@ export class CpuScenePipeline {
           else yield* pipeline.tick(material.time ?? 0, 1 / 60);
           outputs = pipeline.outputs();
           this.computed.set(compute.id, outputs);
+          step?.();
         }
 
         for (const [uniform, texture] of Object.entries(outputs)) {
@@ -155,6 +174,8 @@ export class CpuScenePipeline {
             scene.textures.push(depth);
             material.shader.uniforms.tRefractionDepth = { texture: depth.id };
           }
+
+          step?.();
         }
       }
     }

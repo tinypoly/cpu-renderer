@@ -118,6 +118,21 @@ describe("render worker", () => {
     expect(bucket.aov).toBeUndefined();
   });
 
+  it("reports one preparation step per mesh before it starts", async() => {
+    const worker = await startWorker();
+    const scene = await litBox();
+    worker.send(await frame(1, { scene: { ...scene, meshes: [scene.meshes[0], scene.meshes[0]] } }));
+    await worker.next("start", 1);
+
+    const steps = worker.messages.filter(message => message.type === "preparing")
+      .map(message => `${message.completed}/${message.total}`);
+
+    expect(steps[0]).toBe("0/2");
+    expect(steps.at(-1)).toBe("2/2");
+    const types = worker.messages.map(message => message.type);
+    expect(types.lastIndexOf("preparing")).toBeLessThan(types.indexOf("start"));
+  });
+
   it("applies pixelRatio and renderScale to the render size", async() => {
     const worker = await startWorker();
     worker.send(await frame(1, { width: 10, height: 6, pixelRatio: 2, settings: { ...settings, renderScale: 0.5 } }));

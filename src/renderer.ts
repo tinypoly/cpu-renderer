@@ -48,7 +48,10 @@ export interface CpuRendererEvents {
   start: { width: number; height: number };
   /** Finished pixels of a region, as they arrive: paint them at (`x`, `y`). `image` already holds them. */
   pixels: RenderPixels;
-  /** Work done out of `total`: bands of the cache grid in the cache phase, buckets otherwise. */
+  /**
+   * Work done out of `total`: preparation steps in the prepare phase, bands of the cache grid in the cache phase,
+   * buckets otherwise. The preparation total is 0 until the preparing worker counts its steps.
+   */
   progress: { completed: number; total: number; phase: RenderPhase };
   /** The bucket a worker is on, or `null` when it is idle; `width` and `height` are the render size. */
   bucket: { worker: number; bucket: Bucket | null; width: number; height: number };
@@ -163,6 +166,9 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
   private isPaused = false;
   private scheduler = new BucketScheduler();
   private started = false;
+  // Preparation steps reported by the preparing worker, before the frame starts.
+  private prepareCompleted = 0;
+  private prepareTotal = 0;
   private frame: PendingFrame | null = null;
   // The render() call in flight, from the call itself until its frame settles.
   private active: number | null = null;
@@ -378,6 +384,7 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
     // A new revision: buckets, records and denoised bands of the cancelled frame arriving later are ignored.
     this.revision++;
     this.started = false;
+    this.prepareCompleted = this.prepareTotal = 0;
     this.denoising = false;
     this.slices = [];
     this.readyWorkers.clear();
@@ -466,11 +473,18 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
   private emitProgress() {
     if (!this.frame)
       return;
+
+    if (!this.started) {
+      this.emit("progress", { completed: this.prepareCompleted, total: this.prepareTotal, phase: "prepare" });
+
+      return;
+    }
+
     const cache = this.phase === "cache";
     this.emit("progress", {
       completed: cache ? this.cacheCompleted + this.scheduler.completed : this.scheduler.completed,
       total: cache ? this.prepass.reduce((a, b) => a + b, 0) : this.scheduler.total,
-      phase: !this.started ? "prepare" : this.denoising ? "denoise" : this.phase,
+      phase: this.denoising ? "denoise" : this.phase,
     });
   }
 
@@ -507,6 +521,7 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
   private post(message: RequestPayload, transfer: Transferable[]) {
     this.revision++;
     this.started = false;
+    this.prepareCompleted = this.prepareTotal = 0;
     this.denoising = false;
     this.slices = [];
     this.phase = "shade";
@@ -591,6 +606,14 @@ export class CpuRenderer extends EventEmitter<CpuRendererEvents> {
         for (let index = 1; index < this.workers.length; index++)
           this.workers[index].postMessage(
             { type: "adopt", revision: this.revision, frame: message.frame } satisfies WorkerRequest);
+        break;
+
+      case "preparing":
+        if (this.started)
+          break;
+        this.prepareCompleted = message.completed;
+        this.prepareTotal = message.total;
+        this.emitProgress();
         break;
 
       case "start": {

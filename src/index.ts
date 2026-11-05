@@ -34,7 +34,11 @@ export type {
 
 // Scene snapshots and change detection.
 export { serializeScene } from "./sceneSerialization.js";
-export type { SerializedScene, SerializedSceneResult, SerializeOptions } from "./sceneSerialization.js";
+
+export type {
+  SerializedScene, SerializedSceneResult, SerializeOptions, SerializeSceneOptions,
+} from "./sceneSerialization.js";
+
 export { serializeCamera } from "./camera.js";
 export { sceneSignature } from "./sceneSignature.js";
 export { shareable } from "./sharedBuffers.js";

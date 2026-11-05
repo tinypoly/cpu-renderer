@@ -115,6 +115,11 @@ export type WorkerResponse = {
   type: "active";
   bucket: Bucket;
 } | {
+  /** Steps of the preparation done out of `total`: sky, simulations, captures, then one per mesh. */
+  type: "preparing";
+  completed: number;
+  total: number;
+} | {
   type: "error";
   message: string;
 });

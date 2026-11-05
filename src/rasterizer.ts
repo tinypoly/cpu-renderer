@@ -701,7 +701,8 @@ export class CpuRasterizer {
   }
 
   /** Incremental preparation lets the worker process cancellation during large scene exports. */
-  *prepare(): Generator<void> {
+  /** Builds the geometry, bins and BVH; `step` runs after each mesh, unless the geometry is adopted. */
+  *prepare(step?: () => void): Generator<void> {
     const textures = new Map(this.scene.textures.map(t => [t.id, t]));
     const materials = new Map<object, CpuMaterial>();
     const meshes = new Map<number, { uniforms: Record<string, Value>; winding: number; worldNormal: number[] }>();
@@ -1056,6 +1057,7 @@ export class CpuRasterizer {
         }
       }
 
+      step?.();
       yield;
     }
 

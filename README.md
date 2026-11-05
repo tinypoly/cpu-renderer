@@ -123,7 +123,7 @@ Every option has a setter of the same name.
 | --- | --- | --- |
 | `start` | `{ width, height }` | The workers prepared the frame and are shading. `image` has the render size and is empty. |
 | `pixels` | `{ x, y, width, height, data }` | Finished pixels of a region, as they arrive: rows of a bucket resolved so far, then the whole bucket. `image` already holds them. |
-| `progress` | `{ completed, total, phase }` | Work done out of `total`. `phase` is `"prepare"`, `"cache"` (irradiance cache), `"shade"` (buckets) or `"denoise"`. |
+| `progress` | `{ completed, total, phase }` | Work done out of `total`. `phase` is `"prepare"`, `"cache"` (irradiance cache), `"shade"` (buckets) or `"denoise"`. In `"prepare"` the units are preparation steps (sky, simulations, planar captures, one per mesh), and `total` is 0 until the worker has counted them. |
 | `bucket` | `{ worker, bucket, width, height }` | The bucket a worker is on, or `null` when it is idle. Useful to draw progress frames. |
 | `complete` | | The image is finished. `render()` resolves with it right after. |
 | `error` | `Error` | The frame failed. Unsupported shader syntax is reported here. `render()` rejects with the same error. |
@@ -201,7 +201,7 @@ light.userData.cpuRenderer = { volumetric: { density: 0.05 } } satisfies CpuRend
 
 | Function | |
 | --- | --- |
-| `serializeScene(scene, options?)` | Async. The snapshot `setScene` builds from a Three scene, to reuse across renderers or build off the main thread. `{ mipmaps: false }` leaves the textures' mip chains out, for a renderer that samples only the base level; the CPU renderer needs them. |
+| `serializeScene(scene, options?)` | Async. The snapshot `setScene` builds from a Three scene, to reuse across renderers or build off the main thread. `{ mipmaps: false }` leaves the textures' mip chains out, for a renderer that samples only the base level; the CPU renderer needs them. `onProgress(completed, total)` counts the textures read, starting at 0 once the meshes are in. |
 | `serializeCamera(camera)` | A fixed `CameraState` snapshot of a Three camera, including zoom and view offsets. |
 | `sceneSignature(scene)` | A string that changes whenever something the renderer reads changes. Compare it before re-serializing an interactive scene. |
 | `isAbortError(error)` | Whether a `render()` rejection means the frame was replaced or cancelled rather than failed. |
