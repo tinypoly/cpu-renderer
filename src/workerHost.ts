@@ -131,23 +131,48 @@ export function createWorkerHost(transport: WorkerTransport): (request: WorkerRe
     return { ...source, meshes };
   }
 
+  // Minimum interval between preparation progress messages; the last step always goes out.
+  const PREPARE_PROGRESS_INTERVAL_MS = 50;
+
+  /** Counts the preparation steps and reports them to the client, at most every few milliseconds. */
+  function preparationTracker(total: number, frameRevision: number): () => void {
+    let completed = 0, lastPost = -Infinity;
+
+    const report = () => {
+      lastPost = performance.now();
+      post({ type: "preparing", revision: frameRevision, completed, total });
+    };
+
+    report();
+
+    return () => {
+      completed++;
+      if (completed >= total || performance.now() - lastPost >= PREPARE_PROGRESS_INTERVAL_MS)
+        report();
+    };
+  }
+
   function* prepare(base: CpuRasterizer, frameRevision: number): Generator<void> {
     let lighting = base.environment;
+    const skyKey = base.scene.sky ? JSON.stringify(base.scene.sky) : null;
+    const bakesSky = skyKey !== null && skyCache?.key !== skyKey;
 
-    if (base.scene.sky) {
-      const key = JSON.stringify(base.scene.sky);
+    const step = preparationTracker(
+      (bakesSky ? 1 : 0) + pipeline!.preparationSteps() + base.scene.meshes.length, frameRevision);
 
-      if (skyCache?.key !== key) {
+    if (base.scene.sky && skyKey !== null) {
+      if (bakesSky) {
         const atmosphere = yield* CpuEnvironment.fromProcedural(base.scene.sky);
-        skyCache = { key, environment: atmosphere };
+        skyCache = { key: skyKey, environment: atmosphere };
+        step();
       }
 
-      lighting = skyCache.environment;
+      lighting = skyCache!.environment;
     }
 
-    const prepared = yield* pipeline!.prepare(base.camera, base.settings, base.width, base.height, lighting);
+    const prepared = yield* pipeline!.prepare(base.camera, base.settings, base.width, base.height, lighting, step);
     const ready = new CpuRasterizer(prepared, base.camera, base.settings, base.width, base.height, lighting);
-    yield* ready.prepare();
+    yield* ready.prepare(step);
 
     // The denoiser buffers are created here, shared when the page allows it: each worker writes its own region.
     const aov = base.settings.globalIllumination && base.settings.giDenoise

@@ -149,4 +149,16 @@ describe("CpuScenePipeline", () => {
     const capture = texture(scene, "capture:water:tRefractionMap");
     expect([capture.width, capture.height]).toEqual([1024, 2]);
   });
+
+  it("counts a step per pending simulation and per planar capture, and reports each one", async() => {
+    const pipeline = new CpuScenePipeline(await serialize(
+      shaderMesh({ compute: { pipeline: simulation, id: "water" } }), shaderMesh({ planarCapture: true }, "pond")));
+
+    expect(pipeline.preparationSteps()).toBe(4);
+    let steps = 0;
+    drain(pipeline.prepare(camera([0, 3, 5]), settings, 16, 12, await environment(), () => steps++));
+    expect(steps).toBe(4);
+    // The bake stays for the next frame: only the captures run again.
+    expect(pipeline.preparationSteps()).toBe(3);
+  });
 });

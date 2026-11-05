@@ -547,8 +547,17 @@ export function traverseRendered(object: THREE.Object3D, visit: (object: THREE.O
     traverseRendered(child, visit);
 }
 
+/** Options of a whole-scene snapshot. */
+export interface SerializeSceneOptions extends SerializeOptions {
+  /**
+   * Called with the textures read out of `total`: once with 0 after the meshes and lights, then after each texture.
+   * The meshes are read in one synchronous pass, so the textures are where the page can show progress.
+   */
+  onProgress?: (completed: number, total: number) => void;
+}
+
 export async function serializeScene(
-  scene: THREE.Scene, options: SerializeOptions = {}): Promise<SerializedSceneResult> {
+  scene: THREE.Scene, options: SerializeSceneOptions = {}): Promise<SerializedSceneResult> {
   const withMipmaps = options.mipmaps ?? true;
   const sceneFog = scene.fog as (THREE.Fog & THREE.FogExp2) | null;
   prepareCpuMaterials(scene);
@@ -733,6 +742,8 @@ export async function serializeScene(
   });
   const serializedTextures: SerializedTexture[] = [];
   const pixelCache = new Map<object, Map<string, TexturePixels>>();
+  const { onProgress, ...textureOptions } = options;
+  onProgress?.(0, textures.size);
 
   for (const texture of textures.values()) {
     const key = `${texture.type}:${texture.colorSpace}:${withMipmaps && texture.generateMipmaps}`;
@@ -742,7 +753,7 @@ export async function serializeScene(
       || (texture as THREE.CubeTexture).isCubeTexture
       ? undefined : source?.get(key);
 
-    const serialized = cached ? textureMetadata(texture, cached) : await serializeTexture(texture, options);
+    const serialized = cached ? textureMetadata(texture, cached) : await serializeTexture(texture, textureOptions);
     serializedTextures.push(serialized);
 
     if (!cached && !(withMipmaps && texture.mipmaps.length)) {
@@ -752,6 +763,7 @@ export async function serializeScene(
       pixelCache.set(texture.source, entries);
     }
 
+    onProgress?.(serializedTextures.length, textures.size);
     // Let the browser process input and reclaim temporary readback buffers between textures.
     await new Promise<void>(resolve => setTimeout(resolve, 0));
   }

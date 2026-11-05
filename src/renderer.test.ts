@@ -319,6 +319,26 @@ describe("CpuRenderer frame phases", () => {
     expect(phases).toEqual(["prepare 0/0", "cache 0/3", "cache 1/3", "cache 2/3", "shade 0/1", "shade 1/1"]);
   });
 
+  it("reports the preparation steps of the frame until it starts", async() => {
+    vi.stubGlobal("crossOriginIsolated", false);
+    const renderer = create();
+    const [worker] = FakeWorker.instances;
+    const phases: string[] = [];
+    renderer.on("progress", ({ phase, completed, total }) => phases.push(`${phase} ${completed}/${total}`));
+    const done = renderer.render();
+    await settle();
+    const { revision } = worker.last("frame")!;
+    worker.reply({ type: "preparing", revision, completed: 0, total: 2 });
+    worker.reply({ type: "preparing", revision, completed: 2, total: 2 });
+    // Late preparation messages of an older frame do not count.
+    worker.reply({ type: "preparing", revision: revision - 1, completed: 1, total: 9 });
+    worker.reply({ type: "start", revision, width: 32, height: 32, order: [0], denoise: false, prepass: [] });
+    worker.reply({ type: "bucket", revision, bucket: { x: 0, y: 0, width: 32, height: 32, index: 0 },
+      pixels: new Uint8ClampedArray(32 * 32 * 4) });
+    await done;
+    expect(phases).toEqual(["prepare 0/0", "prepare 0/2", "prepare 2/2", "shade 0/1", "shade 1/1"]);
+  });
+
   it("hands the bucket accumulations to the denoiser and completes only when it answers", async() => {
     vi.stubGlobal("crossOriginIsolated", false);
     const renderer = create();
