@@ -79,6 +79,11 @@ float getDistanceAttenuation(float lightDistance, float cutoffDistance, float de
 float getSpotAttenuation(float coneCosine, float penumbraCosine, float angleCosine) {
   return smoothstep(coneCosine, penumbraCosine, angleCosine);
 }
+struct IncidentLight { vec3 color; vec3 direction; bool visible; };
+struct ReflectedLight { vec3 directDiffuse; vec3 directSpecular; vec3 indirectDiffuse; vec3 indirectSpecular; };
+struct PhysicalMaterial { vec3 diffuseColor; float roughness; vec3 specularColor; float specularF90; float dispersion; };
+void RE_Direct_Physical(IncidentLight directLight, vec3 geometryPosition, vec3 geometryNormal, vec3 geometryViewDir,
+  vec3 geometryClearcoatNormal, PhysicalMaterial material, inout ReflectedLight reflectedLight) {}
 `;
 
 const ONES = [1, 1, 1, 1], ONES3 = [1, 1, 1], ZERO3 = [0, 0, 0];
@@ -274,7 +279,8 @@ export class CpuMaterial {
         this.vertex = new CpuShader(data.shader.vertex, data.shader.defines, shaderChunks);
         this.fragment = new CpuShader((data.shader.patched ? nativeShaderHelpers : "") + data.shader.fragment, data.shader.defines, shaderChunks);
         if (data.shader.fragmentAfter)
-          this.fragmentAfter = new CpuShader(data.shader.fragmentAfter, data.shader.defines, shaderChunks);
+          this.fragmentAfter = new CpuShader(nativeShaderHelpers + data.shader.fragmentAfter, data.shader.defines,
+            shaderChunks);
       } catch(error) {
         throw new Error(`${data.name}: ${(error as Error).message}`, { cause: error });
       }
