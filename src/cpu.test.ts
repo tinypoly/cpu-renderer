@@ -502,6 +502,40 @@ describe("native shader hooks", () => {
 
     expect((await render([mesh])).pixel()[3]).toBe(0);
   });
+  it("gives hooks the material's maps, their coordinates and the chunks Three runs around them", async() => {
+    const mesh = triangle(0xffffff);
+    const map = new THREE.DataTexture(new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255]), 2, 1);
+    map.magFilter = map.minFilter = THREE.NearestFilter;
+    map.needsUpdate = true;
+    mesh.material.map = map;
+
+    mesh.material.onBeforeCompile = shader => {
+      shader.vertexShader = shader.vertexShader.replace("#include <uv_vertex>", "#include <uv_vertex>\nvMapUv = vec2(0.9, 0.5);");
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <clipping_planes_pars_fragment>",
+          "#include <clipping_planes_pars_fragment>\nvec3 sampled() { return texture2D(map, vMapUv).rgb; }")
+        .replace("#include <map_fragment>", "#include <map_fragment>\n#ifdef USE_MAP\ndiffuseColor.rgb = sampled() * diffuse;\n#endif");
+    };
+
+    expect((await render([mesh])).pixel()).toEqual([0, 255, 0, 255]);
+  });
+  it("compiles a hook that wraps Three's physical direct light", async() => {
+    const mesh = new THREE.Mesh(triangle(0xffffff).geometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
+
+    mesh.material.onBeforeCompile = shader => {
+      shader.fragmentShader = shader.fragmentShader.replace("#include <clipping_planes_pars_fragment>", `#include <clipping_planes_pars_fragment>
+void wrappedDirect(const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal,
+  const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material,
+  inout ReflectedLight reflectedLight) {
+  RE_Direct_Physical(directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material,
+    reflectedLight);
+}
+#undef RE_Direct
+#define RE_Direct wrappedDirect`).replace("#include <map_fragment>", "#include <map_fragment>\ndiffuseColor.rgb = vec3(0.0, 0.0, 1.0);");
+    };
+
+    expect((await render([mesh, new THREE.AmbientLight(0xffffff, 1)])).pixel()[2]).toBeGreaterThan(100);
+  });
   it("keeps the focal plane sharp with thin-lens sampling", async() => {
     const mesh = triangle(0xffaa11, -3);
     const sharp = await render([mesh], { maxSamples: 8 });

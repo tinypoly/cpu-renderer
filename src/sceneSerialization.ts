@@ -265,6 +265,7 @@ function serializeMaterial(
 const vertexHooks = [
   "common",
   "uv_pars_vertex",
+  "uv_vertex",
   "beginnormal_vertex",
   "defaultnormal_vertex",
   "begin_vertex",
@@ -275,7 +276,9 @@ const vertexHooks = [
 const fragmentHooks = [
   "common",
   "uv_pars_fragment",
+  "clipping_planes_pars_fragment",
   "clipping_planes_fragment",
+  "map_fragment",
   "color_fragment",
   "normal_fragment_begin",
   "normal_fragment_maps",
@@ -286,22 +289,90 @@ const fragmentHooks = [
   "dithering_fragment",
 ];
 
-function shaderTemplate(hooks: string[]) {
-  return hooks.slice(
-    0,
-    2,
-  ).map(key => `#include <${key}>`).join("\n") + "\nvoid main() {\n"
-    + hooks.slice(2).map(key => `#include <${key}>`).join("\n")
-    + "\n}";
+/** Where the material's own inputs are declared, filled in after the hooks ran so a hook's declaration wins. */
+const INPUTS = "#include <cpu_material_inputs>";
+
+/** Built-in maps a hook may sample, with the define Three gives each one. */
+const HOOK_MAPS = [
+  ["map", "USE_MAP"], ["alphaMap", "USE_ALPHAMAP"], ["bumpMap", "USE_BUMPMAP"], ["normalMap", "USE_NORMALMAP"],
+  ["roughnessMap", "USE_ROUGHNESSMAP"], ["metalnessMap", "USE_METALNESSMAP"], ["emissiveMap", "USE_EMISSIVEMAP"],
+  ["aoMap", "USE_AOMAP"],
+] as const;
+
+/** Built-in values a hook may read, by Three's uniform name, GLSL type and material property. */
+const HOOK_VALUES = [
+  ["diffuse", "vec3", "color"], ["opacity", "float", "opacity"], ["roughness", "float", "roughness"],
+  ["metalness", "float", "metalness"], ["emissive", "vec3", "emissive"], ["bumpScale", "float", "bumpScale"],
+  ["normalScale", "vec2", "normalScale"], ["aoMapIntensity", "float", "aoMapIntensity"],
+] as const;
+
+/** The varying Three keeps a map's coordinates in: vMapUv, vBumpMapUv. */
+const mapVarying = (name: string) => `v${name[0].toUpperCase()}${name.slice(1)}Uv`;
+
+interface HookInput { name: string; declaration: string }
+
+/** The maps and values of a built-in material, declared, set and defined as Three's own program would. */
+function materialInputs(material: THREE.Material, textures: Map<string, THREE.Texture>) {
+  const source = material as unknown as Record<string, unknown>;
+  const vertex: HookInput[] = [], fragment: HookInput[] = [], assignments: string[] = [];
+  const uniforms: Record<string, UniformValue> = {}, defines: Record<string, string> = {};
+
+  for (const [name, define] of HOOK_MAPS) {
+    const texture = source[name] as THREE.Texture | null | undefined;
+
+    if (!texture?.isTexture) continue;
+    if (texture.matrixAutoUpdate) texture.updateMatrix();
+    const varying = mapVarying(name), transform = `${name}Transform`;
+
+    defines[define] = "";
+    textures.set(texture.uuid, texture);
+    uniforms[name] = { texture: texture.uuid };
+    uniforms[transform] = texture.matrix.toArray();
+    vertex.push({ name: transform, declaration: `uniform mat3 ${transform};` },
+      { name: varying, declaration: `varying vec2 ${varying};` });
+    fragment.push({ name, declaration: `uniform sampler2D ${name};` },
+      { name: varying, declaration: `varying vec2 ${varying};` });
+    assignments.push(`${varying} = (${transform} * vec3(${texture.channel ? `uv${texture.channel}` : "uv"}, 1.0)).xy;`);
+  }
+
+  for (const [name, type, property] of HOOK_VALUES) {
+    const value = source[property];
+
+    if (value === undefined || value === null) continue;
+    uniforms[name] = serializeValue(value, textures);
+    fragment.push({ name, declaration: `uniform ${type} ${name};` });
+  }
+
+  return { vertex, fragment, assignments, uniforms, defines };
+}
+
+/** The inputs a shader does not declare itself. */
+function declareInputs(source: string, inputs: HookInput[]) {
+  const missing = inputs.filter(({ name }) => !new RegExp(`\\b(uniform|varying|in|out)\\s+\\w+\\s+${name}\\b`).test(source));
+
+  return source.replace(INPUTS, missing.map(input => input.declaration).join("\n"));
+}
+
+/**
+ * Hooks in Three's order, each one an empty anchor, `main` starting at `mainAt`. The material's inputs are declared
+ * after `common` and the uv chunks, like Three's, and a map's coordinates are set before `uv_vertex` reads them.
+ */
+function shaderTemplate(hooks: string[], mainAt: number, assignments: string[] = []) {
+  const include = (keys: string[]) => keys.map(key => `#include <${key}>`).join("\n");
+
+  return [include(hooks.slice(0, 2)), INPUTS, include(hooks.slice(2, mainAt)), "void main() {", ...assignments,
+    include(hooks.slice(mainAt)), "}"].join("\n");
 }
 
 /** Capture data-only onBeforeCompile hooks without instantiating a GPU renderer. */
 function captureMaterialShader(
   material: THREE.Material,
   textures: Map<string, THREE.Texture>): SerializedShader {
+  const inputs = materialInputs(material, textures);
+
   const shader = {
-    vertexShader: shaderTemplate(vertexHooks),
-    fragmentShader: shaderTemplate(fragmentHooks),
+    vertexShader: shaderTemplate(vertexHooks, 2, inputs.assignments),
+    fragmentShader: shaderTemplate(fragmentHooks, 3),
     uniforms: {} as Record<string, THREE.IUniform>,
   };
 
@@ -315,6 +386,9 @@ function captureMaterialShader(
     shader as THREE.WebGLProgramParametersWithUniforms,
     unavailableRenderer as THREE.WebGLRenderer,
   );
+
+  shader.vertexShader = declareInputs(shader.vertexShader, inputs.vertex);
+  shader.fragmentShader = declareInputs(shader.fragmentShader, inputs.fragment);
 
   const resolveHooks = (source: string, hooks: string[]) =>
     source.replace(
@@ -342,11 +416,15 @@ function captureMaterialShader(
     vertex: resolveHooks(vertex, vertexHooks),
     fragment: resolveHooks(before + "\n}", fragmentHooks),
     fragmentAfter: resolveHooks(common + "\nvoid main() {\n" + after, fragmentHooks),
-    uniforms: Object.fromEntries(Object.entries(shader.uniforms).map(([name, uniform]) => [name, serializeValue(
-      uniform.value,
-      textures,
-    )])),
-    defines: ((material as THREE.ShaderMaterial).defines ?? {}) as Record<string, string | number | boolean>,
+    uniforms: {
+      ...inputs.uniforms,
+      ...Object.fromEntries(Object.entries(shader.uniforms).map(([name, uniform]) => [name, serializeValue(
+        uniform.value,
+        textures,
+      )])),
+    },
+    defines: { ...inputs.defines, ...(material as THREE.ShaderMaterial).defines } as
+      Record<string, string | number | boolean>,
     patched: true,
   };
 }
